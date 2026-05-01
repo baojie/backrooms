@@ -101,7 +101,7 @@
     <p style="margin-top:14px; font-size:12px; color:#a89570;">
       捡起 <b style="color:#f6e29a">杏仁水</b> 恢复理智并加速。靠近楼梯按 E 进入下一层，或乘 <b style="color:#9ed8ff">电梯</b> 直达任意层。
     </p>
-    <p style="margin-top:20px; color:#fff">点击进入</p>
+    <p style="margin-top:20px; color:#fff">点击进入 / 按 <span class="key">ENTER</span></p>
   </div>
 </div>
 
@@ -140,6 +140,8 @@
 <script type="module">
 import * as THREE from 'three';
 import { PointerLockControls } from 'three/addons/controls/PointerLockControls.js';
+import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+import { SkeletonUtils } from 'three/addons/utils/SkeletonUtils.js';
 
 // ============================================================
 // Floor / Level definitions
@@ -292,7 +294,106 @@ heldKnifePivot.rotation.set(-0.2, -0.4, 0.3);
 heldKnifePivot.visible = false;
 camera.add(heldKnifePivot);
 
-function buildCompanionMesh(shirtColor, pantsColor = 0x2a2a3a) {
+// ============================================================
+// Web-resourced humanoid model (Soldier.glb from Three.js examples)
+// ============================================================
+let humanProto = null;
+let humanAnims = null;
+let humanLoaded = false;
+
+const _gltfLoader = new GLTFLoader();
+_gltfLoader.load(
+  'https://threejs.org/examples/models/gltf/Soldier.glb',
+  (gltf) => {
+    humanProto = gltf.scene;
+    humanAnims = gltf.animations || [];
+    humanLoaded = true;
+    console.log('[gltf] Soldier loaded — animations:', humanAnims.map(a => a.name));
+    // Swap any existing procedural placeholders with the real model
+    for (const c of companions) {
+      if (c.alive && c.mesh && !c.mesh.userData.gltf && levelGroup) {
+        const oldPos = c.mesh.position.clone();
+        levelGroup.remove(c.mesh);
+        c.mesh = buildCompanionMesh(c.color, undefined, c.name);
+        c.mesh.position.copy(oldPos);
+        levelGroup.add(c.mesh);
+      }
+    }
+  },
+  undefined,
+  (err) => console.warn('[gltf] Soldier load failed, using procedural fallback', err)
+);
+
+function makeNameTag(name, color = 0xffffff) {
+  const cv = document.createElement('canvas');
+  cv.width = 256; cv.height = 80;
+  const ctx = cv.getContext('2d');
+  ctx.fillStyle = 'rgba(0,0,0,0.55)';
+  ctx.fillRect(0, 0, 256, 80);
+  ctx.strokeStyle = '#' + ((color & 0xffffff) | 0).toString(16).padStart(6, '0');
+  ctx.lineWidth = 4;
+  ctx.strokeRect(2, 2, 252, 76);
+  ctx.fillStyle = '#fff';
+  ctx.font = 'bold 44px "Microsoft YaHei", "PingFang SC", sans-serif';
+  ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+  ctx.fillText(name, 128, 42);
+  const tex = new THREE.CanvasTexture(cv);
+  tex.minFilter = THREE.LinearFilter;
+  const sprite = new THREE.Sprite(new THREE.SpriteMaterial({ map: tex, depthTest: false }));
+  sprite.scale.set(0.7, 0.22, 1);
+  sprite.position.y = 2.05;
+  sprite.renderOrder = 999;
+  return sprite;
+}
+
+function buildGLTFCompanion(shirtColor, name) {
+  const m = SkeletonUtils.clone(humanProto);
+  // Soldier model is ~1.8m and faces +Z by default; faces match.
+  m.scale.set(1.0, 1.0, 1.0);
+  // Tint subtly: clone materials, slight color shift (don't override textures)
+  m.traverse(o => {
+    if (o.isMesh && o.material) {
+      o.material = o.material.clone();
+      if (o.material.color) {
+        // Mix in 25% of shirt color as a tint
+        const c = new THREE.Color(shirtColor);
+        o.material.color.lerp(c, 0.25);
+      }
+      o.castShadow = false;
+      o.frustumCulled = false;
+    }
+  });
+  // Find head bone for talking head-bob
+  let headBone = null;
+  m.traverse(o => {
+    if (o.isBone && /head/i.test(o.name) && !headBone) headBone = o;
+  });
+  // Animation mixer + Idle/Walk/Run actions
+  const mixer = new THREE.AnimationMixer(m);
+  let idleAct = null, walkAct = null, runAct = null;
+  for (const clip of humanAnims) {
+    if (/idle/i.test(clip.name))  idleAct = mixer.clipAction(clip);
+    else if (/^run$/i.test(clip.name)) runAct = mixer.clipAction(clip);
+    else if (/walk/i.test(clip.name)) walkAct = mixer.clipAction(clip);
+  }
+  if (idleAct) { idleAct.play(); idleAct.setEffectiveWeight(1); }
+  if (walkAct) { walkAct.play(); walkAct.setEffectiveWeight(0); }
+  if (runAct)  { runAct.play();  runAct.setEffectiveWeight(0); }
+  m.userData.gltf = { mixer, idleAct, walkAct, runAct, headBone, isGLTF: true };
+  // Floating name tag for differentiation
+  if (name) m.add(makeNameTag(name, shirtColor));
+  return m;
+}
+
+function buildCompanionMesh(shirtColor, pantsColor = 0x2a2a3a, name = null) {
+  if (humanLoaded) return buildGLTFCompanion(shirtColor, name);
+  // Fallback while the GLTF is still loading — procedural figure below
+  const g = buildProceduralCompanion(shirtColor, pantsColor);
+  if (name) g.add(makeNameTag(name, shirtColor));
+  return g;
+}
+
+function buildProceduralCompanion(shirtColor, pantsColor) {
   const g = new THREE.Group();
   const skin  = new THREE.MeshLambertMaterial({ color: 0xf2d2a8 });
   const skin2 = new THREE.MeshLambertMaterial({ color: 0xe8c39a }); // arms slightly darker
@@ -561,7 +662,7 @@ function buildLevel(n, opts = {}) {
 
   for (const c of companions) {
     if (!c.alive) continue;
-    c.mesh = buildCompanionMesh(c.color);
+    c.mesh = buildCompanionMesh(c.color, undefined, c.name);
     c.mesh.position.set(spawnX + c.offset.x, 0, spawnZ + c.offset.z);
     levelGroup.add(c.mesh);
   }
@@ -934,6 +1035,8 @@ function showFloorTitle(n, name) {
   floorTitleEl.style.opacity = '1';
   document.getElementById('floorTag').textContent = `Level ${n} — ${name}`;
   setTimeout(() => floorTitleEl.style.opacity = '0', 2500);
+  // Mandarin announcement
+  setTimeout(() => speak('旁白', `第 ${n} 层  ${name}`), 200);
 }
 
 // ============================================================
@@ -1022,7 +1125,8 @@ function refreshVoices() {
   if (!('speechSynthesis' in window)) return;
   const all = window.speechSynthesis.getVoices();
   zhVoices = all.filter(v => /zh|cmn|chinese|mandarin/i.test(v.lang + ' ' + v.name));
-  if (zhVoices.length === 0) zhVoices = all;
+  // Strict Mandarin: if no zh voice is installed, leave empty so we skip Web Speech entirely
+  // (Piper is preferred and handles zh-CN; falling back to English voices would break immersion).
 }
 if ('speechSynthesis' in window) {
   refreshVoices();
@@ -1038,14 +1142,15 @@ const SPEAKER_KEY = { '小王': 'xiaowang', '小李': 'xiaoli', '旁白': 'narra
 
 function speakWebSpeech(speakerName, text, opts) {
   if (!('speechSynthesis' in window)) return;
+  // Strict Mandarin: never speak if no Chinese voice is available.
+  if (!zhVoices.length) return;
   const c = companions.find(x => x.name === speakerName);
   if (c) c.talking = true;
   const u = new SpeechSynthesisUtterance(text);
   u.lang = 'zh-CN';
   u.rate = opts.rate ?? 1.0;
   u.pitch = opts.pitch ?? 1.0;
-  const v = pickVoice(speakerName);
-  if (v) u.voice = v;
+  u.voice = pickVoice(speakerName);
   if (speakerName === '小王') { u.pitch = 0.85; u.rate = 1.0; }
   else if (speakerName === '小李') { u.pitch = 1.25; u.rate = 1.05; }
   else if (speakerName === '旁白') { u.pitch = 0.7;  u.rate = 0.9;  }
@@ -1148,6 +1253,7 @@ function gotoFloor(i) {
     controls.unlock();
     blip(440, 0.3, 0.18);
     say(`电梯前往：${LEVELS[i].name}`, 2);
+    speak('旁白', `电梯前往 ${LEVELS[i].name}`);
     return;
   }
   // Already in 'pulling' phase, picked floor → continue from closing
@@ -1178,6 +1284,11 @@ addEventListener('keydown', e => {
     if (e.code === 'Digit0') { gotoFloor(9); return; }
     return;
   }
+  if (e.code === 'Enter') {
+    if (overlay.style.display !== 'none') { startGame(); return; }
+    if (deathScreen.style.display === 'flex') { deathScreen.click(); return; }
+    if (winScreen.style.display === 'flex') { winScreen.click(); return; }
+  }
   keys[e.code] = true;
   if (e.code === 'KeyF') player.flashlightOn = !player.flashlightOn;
   if (e.code === 'KeyE') tryInteract();
@@ -1185,7 +1296,15 @@ addEventListener('keydown', e => {
 });
 addEventListener('keyup', e => keys[e.code] = false);
 addEventListener('mousedown', e => {
-  if (e.button === 0 && controls.isLocked) trySwingKnife();
+  if (e.button !== 0) return;
+  if (controls.isLocked) { trySwingKnife(); return; }
+  // If overlay is hidden but pointer lock was lost, re-acquire on click
+  if (overlay.style.display === 'none'
+      && deathScreen.style.display !== 'flex'
+      && winScreen.style.display !== 'flex'
+      && !isElevatorOpen()) {
+    try { controls.lock(); } catch {}
+  }
 });
 
 function trySwingKnife() {
@@ -1247,6 +1366,7 @@ function tryInteract() {
       }
       blip(660, 0.3, 0.2); blip(990, 0.4, 0.18);
       say('下楼……');
+      speak('旁白', '下楼');
       setTimeout(() => buildLevel(currentLevel + 1), 600);
     }
   }
@@ -1259,16 +1379,23 @@ const overlay = document.getElementById('overlay');
 const deathScreen = document.getElementById('deathScreen');
 const winScreen = document.getElementById('winScreen');
 
-overlay.addEventListener('click', () => controls.lock());
+function startGame() {
+  overlay.style.display = 'none';
+  try { controls.lock(); } catch (err) { console.warn('[lock] failed', err); }
+}
+overlay.addEventListener('click', startGame);
 deathScreen.addEventListener('click', () => {
   resetAll();
   deathScreen.style.display = 'none';
-  controls.lock();
+  try { controls.lock(); } catch (err) { console.warn('[lock] failed', err); }
 });
 winScreen.addEventListener('click', () => {
   resetAll();
   winScreen.style.display = 'none';
-  controls.lock();
+  try { controls.lock(); } catch (err) { console.warn('[lock] failed', err); }
+});
+document.addEventListener('pointerlockerror', () => {
+  console.warn('[pointerlock] denied — click the canvas to retry');
 });
 
 controls.addEventListener('lock', () => overlay.style.display = 'none');
@@ -1427,7 +1554,26 @@ function tick() {
       c.mesh.rotation.y = Math.atan2(dx, dz);
       walking = true;
     }
-    // Animate limbs
+    // ---- GLTF humanoid animation (preferred) ----
+    const gltf = c.mesh.userData.gltf;
+    if (gltf) {
+      gltf.mixer.update(dt);
+      const targetWalk = walking ? 1 : 0;
+      const w = c._walkBlend ?? 0;
+      const nw = THREE.MathUtils.lerp(w, targetWalk, 0.18);
+      c._walkBlend = nw;
+      if (gltf.idleAct) gltf.idleAct.setEffectiveWeight(1 - nw);
+      if (gltf.walkAct) gltf.walkAct.setEffectiveWeight(nw);
+      if (gltf.runAct)  gltf.runAct.setEffectiveWeight(0);
+      // Talking: bob the head bone
+      if (gltf.headBone) {
+        gltf.headBone.rotation.x = c.talking ? Math.sin(t * 14) * 0.10 : gltf.headBone.rotation.x * 0.9;
+      }
+      prev = c.mesh.position;
+      continue;
+    }
+
+    // ---- Procedural fallback rig ----
     const rig = c.mesh.userData.rig;
     if (rig) {
       c.walkPhase = (c.walkPhase || 0) + dt * (walking ? 9 : 2);
