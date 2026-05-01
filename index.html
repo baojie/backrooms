@@ -94,9 +94,12 @@
       <span class="key">SHIFT</span> 奔跑 &nbsp;
       <span class="key">鼠标</span> 视角<br>
       <span class="key">F</span> 手电筒 &nbsp;
-      <span class="key">E</span> 互动（楼梯/电梯）&nbsp;
-      <span class="key">左键</span> 开枪 (无限子弹) &nbsp;
-      <span class="key">空格</span> 挥刀<br>
+      <span class="key">E</span> 互动（楼梯/电梯）<br>
+      <span class="key">1</span> 手枪 &nbsp;
+      <span class="key">2</span> AK-47 &nbsp;
+      <span class="key">3</span> 匕首 &nbsp;
+      <span class="key">Q</span> 切换武器<br>
+      <span class="key">左键 / 空格</span> 开枪 / 挥刀（无限子弹，可击毙怪物或队员）<br>
       <span class="key">ESC</span> 释放鼠标
     </p>
     <p style="margin-top:14px; font-size:12px; color:#a89570;">
@@ -279,13 +282,23 @@ const player = {
   totalDist: 0,
   speedBoost: 0,
   almondsCollected: 0,
-  hasKnife: false,
+  hasKnife: true,           // always equipped — selectable in weapon menu
   knifeSwing: 0,
   gunRecoil: 0,
   shotsFired: 0,
   kills: { entities: 0, companions: 0 },
+  weapon: 'pistol',
+  mouseHeld: false,
   lastPos: new THREE.Vector3(),
 };
+
+function setWeapon(name) {
+  if (!WEAPONS[name]) return;
+  player.weapon = name;
+  for (const k of WEAPON_ORDER) WEAPONS[k].pivot.visible = (k === name);
+  const t = `武器：${WEAPONS[name].name}`;
+  say(t, 1.5);
+}
 
 const TEAM_SIZE = 100;
 const GIRL_NAMES = [
@@ -427,6 +440,111 @@ heldPistolPivot.add(heldPistol);
 heldPistolPivot.position.set(0.30, -0.28, -0.50);
 heldPistolPivot.rotation.set(0, -0.05, 0);
 camera.add(heldPistolPivot);
+
+function buildAKMesh() {
+  const g = new THREE.Group();
+  const wood  = new THREE.MeshLambertMaterial({ color: 0x6b3a18 });
+  const metal = new THREE.MeshLambertMaterial({ color: 0x262628 });
+  const dark  = new THREE.MeshLambertMaterial({ color: 0x14100c });
+  const accent = new THREE.MeshBasicMaterial({ color: 0x666666 });
+  // Receiver
+  const receiver = new THREE.Mesh(new THREE.BoxGeometry(0.06, 0.10, 0.42), metal);
+  receiver.position.set(0, 0.04, -0.05);
+  g.add(receiver);
+  // Barrel
+  const barrel = new THREE.Mesh(new THREE.CylinderGeometry(0.013, 0.013, 0.44, 10), metal);
+  barrel.rotation.x = Math.PI / 2;
+  barrel.position.set(0, 0.06, -0.42);
+  g.add(barrel);
+  // Wooden hand-guard around the barrel
+  const handguard = new THREE.Mesh(new THREE.BoxGeometry(0.055, 0.07, 0.22), wood);
+  handguard.position.set(0, 0.025, -0.32);
+  g.add(handguard);
+  // Gas tube above the barrel
+  const gas = new THREE.Mesh(new THREE.CylinderGeometry(0.010, 0.010, 0.22, 8), metal);
+  gas.rotation.x = Math.PI / 2;
+  gas.position.set(0, 0.10, -0.32);
+  g.add(gas);
+  // Front sight post
+  const sight = new THREE.Mesh(new THREE.BoxGeometry(0.008, 0.045, 0.014), metal);
+  sight.position.set(0, 0.115, -0.62);
+  g.add(sight);
+  // Muzzle device
+  const muzzle = new THREE.Mesh(new THREE.CylinderGeometry(0.018, 0.018, 0.045, 10), dark);
+  muzzle.rotation.x = Math.PI / 2;
+  muzzle.position.set(0, 0.06, -0.66);
+  g.add(muzzle);
+  // Wooden stock
+  const stock = new THREE.Mesh(new THREE.BoxGeometry(0.05, 0.10, 0.28), wood);
+  stock.position.set(0, 0.01, 0.24);
+  g.add(stock);
+  // Pistol grip
+  const grip = new THREE.Mesh(new THREE.BoxGeometry(0.045, 0.16, 0.06), wood);
+  grip.position.set(0, -0.10, 0.06);
+  grip.rotation.x = -0.32;
+  g.add(grip);
+  // Banana magazine (curved approximation: two tilted boxes)
+  const mag1 = new THREE.Mesh(new THREE.BoxGeometry(0.04, 0.16, 0.07), dark);
+  mag1.position.set(0, -0.10, -0.06);
+  mag1.rotation.x = -0.18;
+  g.add(mag1);
+  const mag2 = new THREE.Mesh(new THREE.BoxGeometry(0.04, 0.10, 0.06), dark);
+  mag2.position.set(0, -0.21, -0.10);
+  mag2.rotation.x = -0.45;
+  g.add(mag2);
+  // Trigger guard
+  const tg = new THREE.Mesh(new THREE.TorusGeometry(0.035, 0.007, 6, 12, Math.PI), metal);
+  tg.position.set(0, -0.035, 0.03);
+  tg.rotation.x = -Math.PI / 2;
+  tg.rotation.z = Math.PI;
+  g.add(tg);
+  // Trigger
+  const trigger = new THREE.Mesh(new THREE.BoxGeometry(0.012, 0.038, 0.012), accent);
+  trigger.position.set(0, -0.04, 0.03);
+  g.add(trigger);
+  // Selector lever
+  const sel = new THREE.Mesh(new THREE.BoxGeometry(0.05, 0.012, 0.05), metal);
+  sel.position.set(0.034, 0.04, 0.02);
+  g.add(sel);
+  // Muzzle flash
+  const flashMat = new THREE.MeshBasicMaterial({ color: 0xfff2a0, transparent: true, opacity: 0 });
+  const flash = new THREE.Mesh(new THREE.SphereGeometry(0.08, 8, 6), flashMat);
+  flash.position.set(0, 0.06, -0.71);
+  flash.scale.set(1.5, 1.5, 0.7);
+  g.add(flash);
+  g.userData.flash = flash;
+  return g;
+}
+const heldAKPivot = new THREE.Group();
+const heldAK = buildAKMesh();
+heldAKPivot.add(heldAK);
+heldAKPivot.position.set(0.32, -0.32, -0.55);
+heldAKPivot.rotation.set(0, -0.04, 0);
+heldAKPivot.visible = false;
+camera.add(heldAKPivot);
+
+const WEAPONS = {
+  pistol: {
+    name: '手枪 Pistol',  kind: 'gun',
+    pivot: heldPistolPivot, held: heldPistol,
+    cooldown: 0.18, auto: false,
+    recoilKick: 0.45, soundHi: 900, soundLo: 220,
+    flashScreen: 0.12, sanityHitCompanion: 0.10,
+  },
+  ak47: {
+    name: 'AK-47',  kind: 'gun',
+    pivot: heldAKPivot, held: heldAK,
+    cooldown: 0.085, auto: true,
+    recoilKick: 0.30, soundHi: 620, soundLo: 160,
+    flashScreen: 0.18, sanityHitCompanion: 0.05,
+  },
+  knife: {
+    name: '匕首 Knife',  kind: 'melee',
+    pivot: heldKnifePivot, held: heldKnife,
+    cooldown: 0.35, auto: false,
+  },
+};
+const WEAPON_ORDER = ['pistol', 'ak47', 'knife'];
 
 // ============================================================
 // Web-resourced humanoid model (Soldier.glb from Three.js examples)
@@ -2205,13 +2323,25 @@ addEventListener('keydown', e => {
   keys[e.code] = true;
   if (e.code === 'KeyF') player.flashlightOn = !player.flashlightOn;
   if (e.code === 'KeyE') tryInteract();
-  if (e.code === 'Space') { e.preventDefault(); trySwingKnife(); }
+  if (e.code === 'Digit1') setWeapon('pistol');
+  else if (e.code === 'Digit2') setWeapon('ak47');
+  else if (e.code === 'Digit3') setWeapon('knife');
+  else if (e.code === 'KeyQ') {
+    const idx = WEAPON_ORDER.indexOf(player.weapon);
+    setWeapon(WEAPON_ORDER[(idx + 1) % WEAPON_ORDER.length]);
+  }
+  if (e.code === 'Space') { e.preventDefault(); useWeapon(); }
 });
-addEventListener('keyup', e => keys[e.code] = false);
+addEventListener('keyup', e => {
+  keys[e.code] = false;
+});
 addEventListener('mousedown', e => {
   if (e.button !== 0) return;
-  if (controls.isLocked) { fireGun(); return; }
-  // If overlay is hidden but pointer lock was lost, re-acquire on click
+  if (controls.isLocked) {
+    player.mouseHeld = true;
+    useWeapon();
+    return;
+  }
   if (overlay.style.display === 'none'
       && deathScreen.style.display !== 'flex'
       && winScreen.style.display !== 'flex'
@@ -2219,6 +2349,16 @@ addEventListener('mousedown', e => {
     try { controls.lock(); } catch {}
   }
 });
+addEventListener('mouseup', e => {
+  if (e.button === 0) player.mouseHeld = false;
+});
+
+function useWeapon() {
+  const w = WEAPONS[player.weapon];
+  if (!w) return;
+  if (w.kind === 'gun') fireGun();
+  else if (w.kind === 'melee') trySwingKnife();
+}
 
 const _gunRay = new THREE.Raycaster();
 const _gunOrigin = new THREE.Vector2(0, 0);
@@ -2234,18 +2374,20 @@ function leaveCorpse(mesh) {
 }
 
 function fireGun() {
-  if (player.gunRecoil > 0.05) return; // small fire-rate cap
-  player.gunRecoil = 0.18;
+  const w = WEAPONS[player.weapon];
+  if (!w || w.kind !== 'gun') return;
+  if (player.gunRecoil > 0) return;
+  player.gunRecoil = w.cooldown;
   player.shotsFired++;
-  blip(900, 0.05, 0.28); blip(220, 0.10, 0.20);
+  blip(w.soundHi, 0.05, 0.28); blip(w.soundLo, 0.10, 0.20);
   // Muzzle flash
-  const flash = heldPistol.userData.flash;
+  const flash = w.held.userData.flash;
   if (flash) {
     flash.material.opacity = 1.0;
-    setTimeout(() => { flash.material.opacity = 0; }, 60);
+    setTimeout(() => { flash.material.opacity = 0; }, 50);
   }
   // Screen flash subtle
-  flashEl.style.opacity = '0.12';
+  flashEl.style.opacity = String(w.flashScreen);
   setTimeout(() => flashEl.style.opacity = '0', 50);
 
   // Build candidate target list
@@ -2280,7 +2422,7 @@ function fireGun() {
     leaveCorpse(target.ref.mesh);
     target.ref.mesh = null;
     player.kills.companions++;
-    player.sanity = Math.max(0, player.sanity - 0.10);
+    player.sanity = Math.max(0, player.sanity - w.sanityHitCompanion);
     say(`你射杀了 ${target.ref.name}……`, 3);
   }
 }
@@ -2388,10 +2530,10 @@ function resetAll() {
   player.hp = 1; player.sanity = 1; player.stamina = 1;
   player.flashlightBattery = 1; player.flashlightOn = false;
   player.totalDist = 0; player.speedBoost = 0; player.almondsCollected = 0;
-  player.hasKnife = false; player.knifeSwing = 0;
+  player.hasKnife = true; player.knifeSwing = 0;
   player.gunRecoil = 0; player.shotsFired = 0;
   player.kills = { entities: 0, companions: 0 };
-  heldKnifePivot.visible = false;
+  setWeapon('pistol');
   for (const c of companions) { c.hp = 1; c.alive = true; }
   buildLevel(0);
 }
@@ -2509,15 +2651,24 @@ function tick() {
     heldKnifePivot.rotation.z =  0.3 + Math.sin(t * 1.2) * 0.02;
   }
 
-  // Pistol recoil + idle bob
-  if (player.gunRecoil > 0) {
-    player.gunRecoil = Math.max(0, player.gunRecoil - dt);
-    const k = player.gunRecoil / 0.18;
-    heldPistolPivot.rotation.x = -k * 0.45;
-    heldPistolPivot.position.z = -0.50 + k * 0.06;
-  } else {
-    heldPistolPivot.rotation.x = Math.sin(t * 1.5) * 0.02;
-    heldPistolPivot.position.z = -0.50 + Math.sin(t * 1.2) * 0.005;
+  // Auto-fire for full-auto weapons while LMB is held
+  const wActive = WEAPONS[player.weapon];
+  if (player.mouseHeld && wActive && wActive.auto && controls.isLocked) {
+    fireGun();
+  }
+
+  // Gun recoil + idle bob (animates whichever gun is held)
+  const gunPivot = wActive && wActive.kind === 'gun' ? wActive.pivot : null;
+  if (gunPivot) {
+    if (player.gunRecoil > 0) {
+      player.gunRecoil = Math.max(0, player.gunRecoil - dt);
+      const k = player.gunRecoil / wActive.cooldown;
+      gunPivot.rotation.x = -k * wActive.recoilKick;
+      gunPivot.position.z = (player.weapon === 'ak47' ? -0.55 : -0.50) + k * 0.06;
+    } else {
+      gunPivot.rotation.x = Math.sin(t * 1.5) * 0.02;
+      gunPivot.position.z = (player.weapon === 'ak47' ? -0.55 : -0.50) + Math.sin(t * 1.2) * 0.005;
+    }
   }
 
   flashlight.intensity = (player.flashlightOn && player.flashlightBattery > 0) ? 60 : 0;
@@ -2725,6 +2876,8 @@ function tick() {
           c.alive = false;
           leaveCorpse(c.mesh);
           c.mesh = null;
+          // Death cry — vocal "啊!" via TTS, plus a synthesized scream tone
+          playDeathCry(c);
           const line = `${c.name} 被吞没了……`;
           say(line, 4);
           speak('旁白', line, { rate: 0.8, pitch: 0.55 });
@@ -2777,7 +2930,7 @@ function tick() {
   document.getElementById('hpFill').style.width      = (Math.max(0,player.hp)*100)+'%';
   document.getElementById('distance').textContent =
     '行程：' + Math.floor(player.totalDist) + ' 米　杏仁水：' + player.almondsCollected +
-    (player.hasKnife ? '　🗡' : '') +
+    '　武器：' + WEAPONS[player.weapon].name +
     (player.speedBoost > 0 ? '　加速 ' + player.speedBoost.toFixed(1) + 's' : '');
 
   const teamEl = document.getElementById('team');
