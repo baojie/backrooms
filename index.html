@@ -222,7 +222,9 @@ addEventListener('resize', () => {
   renderer.setSize(innerWidth, innerHeight);
 });
 
-const flashlight = new THREE.SpotLight(0xfff5c8, 0, 22, Math.PI/5, 0.35, 1.0);
+// Wide, far-reaching beam — lights up a large area in front of the player.
+// angle ≈ 60° (Math.PI/3), generous penumbra, gentle falloff, long range.
+const flashlight = new THREE.SpotLight(0xfff5c8, 0, 50, Math.PI/3, 0.5, 0.7);
 flashlight.position.set(0, 0, 0.1);
 flashlight.target.position.set(0, 0, -1);
 camera.add(flashlight);
@@ -497,15 +499,25 @@ function buildGLTFCompanion(shirtColor, name) {
 }
 
 function buildCompanionMesh(palette, _ignored = undefined, name = null) {
-  // Use the earlier, better-looking procedural figure (the one with rigged
-  // capsule torso, ellipsoid head, hair cap, eye-tracking and animated mouth).
-  // `palette` is now a {dressColor, hairColor, skinColor, accentColor} bag —
-  // adapt it to the older (shirtColor, pantsColor) signature.
   const shirtColor = (palette && palette.dressColor) ?? palette ?? 0x6bb0ff;
   const pantsColor = (palette && palette.accentColor) ?? 0x2a2a3a;
   const g = buildProceduralCompanion(shirtColor, pantsColor);
   if (name) g.add(makeNameTag(name, shirtColor));
   return g;
+}
+
+// Attach a small knife to the companion's right hand.
+function attachCompanionKnife(mesh) {
+  const rig = mesh.userData.rig;
+  if (!rig || !rig.rightArm) return null;
+  const elbow = rig.rightArm.children.find(o => o.isGroup);
+  if (!elbow) return null;
+  const knife = buildKnifeMesh();
+  knife.scale.set(0.55, 0.55, 0.55);
+  knife.rotation.set(0, 0, -Math.PI / 2);
+  knife.position.set(0, -0.42, 0.04);
+  elbow.add(knife);
+  return knife;
 }
 
 // Shared geometries — one allocation reused across all 100 figures.
@@ -819,6 +831,215 @@ function buildProceduralCompanion(shirtColor, pantsColor) {
 }
 
 // ============================================================
+// Hostile humanoid entity — gaunt, robed, glowing-eyed figure
+// Same rig keys as companions so the walk loop can drive it.
+// ============================================================
+function buildHumanoidEntity() {
+  const g = new THREE.Group();
+  const flesh    = new THREE.MeshLambertMaterial({ color: 0x9aa39c });   // ashen grey
+  const fleshDk  = new THREE.MeshLambertMaterial({ color: 0x6c7370 });
+  const robe     = new THREE.MeshLambertMaterial({ color: 0x111014, side: THREE.DoubleSide });
+  const robeTrim = new THREE.MeshLambertMaterial({ color: 0x2a1a22 });
+  const hair     = new THREE.MeshLambertMaterial({ color: 0x080608 });
+  const claw     = new THREE.MeshLambertMaterial({ color: 0x1a1410 });
+  const sclera   = new THREE.MeshBasicMaterial({ color: 0xfff4d0 });     // sickly glow
+  const iris     = new THREE.MeshBasicMaterial({ color: 0xff2a2a });
+  const teethM   = new THREE.MeshBasicMaterial({ color: 0xddd0b8 });
+  const mouthM   = new THREE.MeshBasicMaterial({ color: 0x180608 });
+
+  // ---- Torso: gaunt capsule under a hooded robe ----
+  const torso = new THREE.Mesh(
+    new THREE.CapsuleGeometry(0.22, 0.50, 6, 12), robe
+  );
+  torso.position.y = 1.28;
+  torso.scale.set(1.0, 1.0, 0.85);
+  g.add(torso);
+
+  // Bony collarbone hint above robe
+  const chest = new THREE.Mesh(
+    new THREE.SphereGeometry(0.12, 12, 10), fleshDk
+  );
+  chest.position.set(0, 1.55, -0.04);
+  chest.scale.set(1.4, 0.4, 0.6);
+  g.add(chest);
+
+  // Hips / pelvis
+  const hips = new THREE.Mesh(
+    new THREE.CylinderGeometry(0.21, 0.18, 0.18, 14), robeTrim
+  );
+  hips.position.y = 0.86;
+  g.add(hips);
+
+  // Tattered robe skirt — cone with jagged hem
+  const skirt = new THREE.Mesh(
+    new THREE.ConeGeometry(0.42, 0.85, 14, 1, true), robe
+  );
+  skirt.position.y = 0.50;
+  g.add(skirt);
+  // Tatter strips dangling below the hem
+  for (let i = 0; i < 7; i++) {
+    const a = (i / 7) * Math.PI * 2 + Math.random() * 0.3;
+    const r = 0.34 + Math.random() * 0.06;
+    const strip = new THREE.Mesh(
+      new THREE.BoxGeometry(0.05, 0.18 + Math.random() * 0.20, 0.02), robe
+    );
+    strip.position.set(Math.cos(a) * r, 0.16, Math.sin(a) * r);
+    strip.rotation.y = a;
+    g.add(strip);
+  }
+
+  // ---- Neck + head ----
+  const neck = new THREE.Mesh(
+    new THREE.CylinderGeometry(0.060, 0.072, 0.14, 10), fleshDk
+  );
+  neck.position.y = 1.66;
+  g.add(neck);
+
+  const head = new THREE.Group();
+  head.position.y = 1.80;
+  // Elongated skull
+  const skull = new THREE.Mesh(new THREE.SphereGeometry(0.17, 18, 16), flesh);
+  skull.scale.set(0.88, 1.15, 0.92);
+  head.add(skull);
+  // Sunken cheek hollows
+  const lHollow = new THREE.Mesh(new THREE.SphereGeometry(0.06, 10, 8), fleshDk);
+  const rHollow = new THREE.Mesh(new THREE.SphereGeometry(0.06, 10, 8), fleshDk);
+  lHollow.position.set(-0.10, -0.02, -0.13); lHollow.scale.set(1.0, 1.4, 0.5);
+  rHollow.position.set( 0.10, -0.02, -0.13); rHollow.scale.set(1.0, 1.4, 0.5);
+  head.add(lHollow); head.add(rHollow);
+
+  // Hood — wide cone behind the skull
+  const hood = new THREE.Mesh(
+    new THREE.ConeGeometry(0.27, 0.42, 14, 1, true), robe
+  );
+  hood.position.set(0, 0.05, 0.02);
+  hood.rotation.x = -0.20;
+  head.add(hood);
+
+  // Stringy hair clumps falling forward
+  for (let i = 0; i < 6; i++) {
+    const strand = new THREE.Mesh(
+      new THREE.BoxGeometry(0.04, 0.28 + Math.random() * 0.10, 0.015), hair
+    );
+    const ang = -0.6 + (i / 5) * 1.2;
+    strand.position.set(Math.sin(ang) * 0.16, -0.06, -0.165 + Math.cos(ang) * 0.02);
+    strand.rotation.z = ang * 0.25;
+    head.add(strand);
+  }
+
+  // Eye sockets (deep) + glowing eyeballs that pivot
+  const socketG = new THREE.SphereGeometry(0.052, 10, 8);
+  const lSocket = new THREE.Mesh(socketG, fleshDk);
+  const rSocket = new THREE.Mesh(socketG, fleshDk);
+  lSocket.position.set(-0.060, 0.02, -0.140); lSocket.scale.set(1.0, 0.8, 0.6);
+  rSocket.position.set( 0.060, 0.02, -0.140); rSocket.scale.set(1.0, 0.8, 0.6);
+  head.add(lSocket); head.add(rSocket);
+  const lEyeball = new THREE.Group(); lEyeball.position.copy(lSocket.position);
+  const rEyeball = new THREE.Group(); rEyeball.position.copy(rSocket.position);
+  lEyeball.position.z -= 0.012; rEyeball.position.z -= 0.012;
+  const eyeBallG = new THREE.SphereGeometry(0.030, 12, 10);
+  const irisG    = new THREE.SphereGeometry(0.016, 10, 8);
+  lEyeball.add(new THREE.Mesh(eyeBallG, sclera));
+  rEyeball.add(new THREE.Mesh(eyeBallG, sclera));
+  const lI = new THREE.Mesh(irisG, iris); lI.position.z = -0.022; lEyeball.add(lI);
+  const rI = new THREE.Mesh(irisG, iris); rI.position.z = -0.022; rEyeball.add(rI);
+  head.add(lEyeball); head.add(rEyeball);
+
+  // Heavy brow ridge
+  const browG = new THREE.BoxGeometry(0.08, 0.018, 0.02);
+  const lBrow = new THREE.Mesh(browG, fleshDk); lBrow.position.set(-0.060, 0.075, -0.150); lBrow.rotation.z =  0.15;
+  const rBrow = new THREE.Mesh(browG, fleshDk); rBrow.position.set( 0.060, 0.075, -0.150); rBrow.rotation.z = -0.15;
+  head.add(lBrow); head.add(rBrow);
+
+  // Sharp narrow nose
+  const nose = new THREE.Mesh(new THREE.ConeGeometry(0.020, 0.09, 4), flesh);
+  nose.rotation.x = Math.PI / 2;
+  nose.position.set(0, -0.005, -0.180);
+  head.add(nose);
+
+  // Gaping mouth with teeth — slightly open
+  const mouth = new THREE.Mesh(new THREE.BoxGeometry(0.12, 0.05, 0.02), mouthM);
+  mouth.position.set(0, -0.085, -0.165);
+  head.add(mouth);
+  for (let i = 0; i < 5; i++) {
+    const tooth = new THREE.Mesh(new THREE.ConeGeometry(0.010, 0.030, 4), teethM);
+    tooth.rotation.x = Math.PI;
+    tooth.position.set(-0.045 + i * 0.022, -0.072, -0.158);
+    head.add(tooth);
+  }
+  for (let i = 0; i < 5; i++) {
+    const tooth = new THREE.Mesh(new THREE.ConeGeometry(0.010, 0.030, 4), teethM);
+    tooth.position.set(-0.045 + i * 0.022, -0.098, -0.158);
+    head.add(tooth);
+  }
+
+  g.add(head);
+
+  // ---- Long, bony arms with clawed hands ----
+  function makeArm(side) {
+    const arm = new THREE.Group();
+    arm.position.set(side * 0.27, 1.55, 0);
+    // Robe sleeve (upper) + bare bony forearm
+    const upper = new THREE.Mesh(new THREE.CapsuleGeometry(0.080, 0.36, 4, 10), robe);
+    upper.position.y = -0.22;
+    arm.add(upper);
+    const elbow = new THREE.Group();
+    elbow.position.y = -0.46;
+    const fore = new THREE.Mesh(new THREE.CapsuleGeometry(0.045, 0.36, 4, 10), fleshDk);
+    fore.position.y = -0.22;
+    elbow.add(fore);
+    const palm = new THREE.Mesh(new THREE.SphereGeometry(0.07, 10, 8), fleshDk);
+    palm.position.y = -0.46;
+    palm.scale.set(0.8, 0.6, 1.2);
+    elbow.add(palm);
+    // Three claws
+    for (let i = -1; i <= 1; i++) {
+      const cl = new THREE.Mesh(new THREE.ConeGeometry(0.013, 0.10, 5), claw);
+      cl.position.set(i * 0.025, -0.54, -0.04);
+      cl.rotation.x = Math.PI; // tip down/forward
+      cl.rotation.z = i * 0.12;
+      elbow.add(cl);
+    }
+    arm.add(elbow);
+    g.add(arm);
+    return arm;
+  }
+  const leftArm  = makeArm(-1);
+  const rightArm = makeArm( 1);
+  // Resting forward reach — looks predatory
+  leftArm.rotation.x  = -0.35;
+  rightArm.rotation.x = -0.35;
+
+  // ---- Legs (hidden inside robe but animate visibly via skirt sway) ----
+  function makeLeg(side) {
+    const leg = new THREE.Group();
+    leg.position.set(side * 0.10, 0.78, 0);
+    const upper = new THREE.Mesh(new THREE.CapsuleGeometry(0.085, 0.32, 4, 10), robeTrim);
+    upper.position.y = -0.22;
+    leg.add(upper);
+    const knee = new THREE.Group();
+    knee.position.y = -0.44;
+    const lower = new THREE.Mesh(new THREE.CapsuleGeometry(0.065, 0.30, 4, 10), fleshDk);
+    lower.position.y = -0.20;
+    knee.add(lower);
+    const foot = new THREE.Mesh(new THREE.BoxGeometry(0.16, 0.05, 0.26), claw);
+    foot.position.set(0, -0.40, 0.04);
+    knee.add(foot);
+    leg.add(knee);
+    g.add(leg);
+    return leg;
+  }
+  const leftLeg  = makeLeg(-1);
+  const rightLeg = makeLeg( 1);
+
+  g.userData.rig = {
+    leftArm, rightArm, leftLeg, rightLeg, head,
+    lEyeball, rEyeball, torso, skirt, mouth,
+  };
+  return g;
+}
+
+// ============================================================
 // Maze
 // ============================================================
 function buildMaze() {
@@ -960,6 +1181,7 @@ function buildLevel(n, opts = {}) {
   for (const c of companions) {
     if (!c.alive) continue;
     c.mesh = buildCompanionMesh(c, undefined, c.name);
+    if (c.hasKnife) attachCompanionKnife(c.mesh);
     const px = spawnX + Math.cos(c.angle) * c.radius;
     const pz = spawnZ + Math.sin(c.angle) * c.radius;
     c.mesh.position.set(px, 0, pz);
@@ -1150,22 +1372,14 @@ function buildLevel(n, opts = {}) {
 
   const numEntities = 1 + Math.floor(n / 3);
   for (let i = 0; i < numEntities; i++) {
-    const eg = new THREE.Group();
-    const body = new THREE.Mesh(
-      new THREE.CapsuleGeometry(0.35, 1.4, 4, 8),
-      new THREE.MeshBasicMaterial({ color: 0x000000 })
-    );
-    body.position.y = 1.0;
-    eg.add(body);
-    const eye = new THREE.MeshBasicMaterial({ color: 0xffffff });
-    const eyeG = new THREE.SphereGeometry(0.07, 6, 6);
-    const l = new THREE.Mesh(eyeG, eye), r = new THREE.Mesh(eyeG, eye);
-    l.position.set(-0.12, 1.5, -0.32); r.position.set(0.12, 1.5, -0.32);
-    eg.add(l); eg.add(r);
+    const eg = buildHumanoidEntity();
     const ec = openCells[Math.floor(Math.random()*openCells.length)];
     eg.position.set((ec[0]-GRID/2)*CELL, 0, (ec[1]-GRID/2)*CELL);
     levelGroup.add(eg);
-    entities.push({ mesh: eg, speed: 1.4 + n*0.18, hp: 1.0 });
+    entities.push({
+      mesh: eg, speed: 1.4 + n*0.18, hp: 1.0,
+      walkPhase: Math.random() * Math.PI * 2,
+    });
   }
 
   // If we arrived by elevator, spawn the player just outside its doors,
@@ -1420,12 +1634,26 @@ let currentTTSAudio = null;  // currently playing piper Audio element
 })();
 
 let zhVoices = [];
+function isMandarinVoice(v) {
+  const lang = (v.lang || '').toLowerCase();
+  const name = (v.name || '').toLowerCase();
+  // Reject Cantonese + other Chinese variants explicitly
+  if (lang.startsWith('zh-hk') || lang.startsWith('zh-yue') || lang.startsWith('yue')
+      || /cantonese|hakka|min nan|wu/.test(name)) return false;
+  // Accept Mandarin: zh-CN, zh-TW (Taiwanese Mandarin), cmn-*, zh, or names that say Mandarin
+  return lang === 'zh' || lang.startsWith('zh-cn') || lang.startsWith('zh-tw')
+      || lang.startsWith('zh-cmn') || lang.startsWith('cmn')
+      || /mandarin|普通话|国语|汉语|chinese.*mandarin/i.test(name);
+}
 function refreshVoices() {
   if (!('speechSynthesis' in window)) return;
   const all = window.speechSynthesis.getVoices();
-  zhVoices = all.filter(v => /zh|cmn|chinese|mandarin/i.test(v.lang + ' ' + v.name));
-  // Strict Mandarin: if no zh voice is installed, leave empty so we skip Web Speech entirely
-  // (Piper is preferred and handles zh-CN; falling back to English voices would break immersion).
+  zhVoices = all.filter(isMandarinVoice);
+  if (zhVoices.length) {
+    console.log('[tts] mandarin voices:', zhVoices.map(v => `${v.name} (${v.lang})`));
+  } else {
+    console.log('[tts] no mandarin voices installed — Web Speech disabled');
+  }
 }
 if ('speechSynthesis' in window) {
   refreshVoices();
@@ -1441,18 +1669,23 @@ const SPEAKER_KEY = { '小王': 'xiaowang', '小李': 'xiaoli', '旁白': 'narra
 
 function speakWebSpeech(speakerName, text, opts) {
   if (!('speechSynthesis' in window)) return;
-  // Strict Mandarin: never speak if no Chinese voice is available.
-  if (!zhVoices.length) return;
+  // Strict Mandarin: never speak if no Mandarin voice is available.
+  const voice = pickVoice(speakerName);
+  if (!voice || !isMandarinVoice(voice)) return;
   const c = companions.find(x => x.name === speakerName);
   if (c) c.talking = true;
   const u = new SpeechSynthesisUtterance(text);
   u.lang = 'zh-CN';
+  u.voice = voice;
   u.rate = opts.rate ?? 1.0;
   u.pitch = opts.pitch ?? 1.0;
-  u.voice = pickVoice(speakerName);
-  if (speakerName === '小王') { u.pitch = 0.85; u.rate = 1.0; }
-  else if (speakerName === '小李') { u.pitch = 1.25; u.rate = 1.05; }
-  else if (speakerName === '旁白') { u.pitch = 0.7;  u.rate = 0.9;  }
+  if (speakerName === '旁白') { u.pitch = 0.7;  u.rate = 0.9; }
+  else {
+    // Per-character pitch from a stable hash so each of the 100 girls sounds distinct
+    let h = 0; for (const ch of speakerName) h = (h*31 + ch.charCodeAt(0)) & 0xff;
+    u.pitch = 0.95 + (h / 255) * 0.5;     // 0.95 .. 1.45
+    u.rate  = 0.95 + ((h * 7) & 0xff) / 255 * 0.2; // 0.95 .. 1.15
+  }
   u.onend = () => { if (c) c.talking = false; };
   u.onerror = () => { if (c) c.talking = false; };
   window.speechSynthesis.cancel();
@@ -2287,7 +2520,7 @@ function tick() {
     heldPistolPivot.position.z = -0.50 + Math.sin(t * 1.2) * 0.005;
   }
 
-  flashlight.intensity = (player.flashlightOn && player.flashlightBattery > 0) ? 40 : 0;
+  flashlight.intensity = (player.flashlightOn && player.flashlightBattery > 0) ? 60 : 0;
   if (player.flashlightOn) {
     player.flashlightBattery = Math.max(0, player.flashlightBattery - dt*0.02);
     if (player.flashlightBattery === 0) player.flashlightOn = false;
@@ -2351,6 +2584,56 @@ function tick() {
         rig.head.rotation.x *= 0.9;
         if (rig.lips) rig.lips.scale.y += (1 - rig.lips.scale.y) * 0.3;
       }
+
+      // ---- Knife combat (kills monsters; never targets the player) ----
+      if (c.hasKnife) {
+        let nearest = null, nd = Infinity;
+        for (const e of entities) {
+          const ddx = e.mesh.position.x - c.mesh.position.x;
+          const ddz = e.mesh.position.z - c.mesh.position.z;
+          const d2 = ddx*ddx + ddz*ddz;
+          if (d2 < nd) { nd = d2; nearest = e; }
+        }
+        nd = Math.sqrt(nd);
+        if (nearest && nd < 3.0) {
+          // Break formation toward the entity
+          const ax = nearest.mesh.position.x - c.mesh.position.x;
+          const az = nearest.mesh.position.z - c.mesh.position.z;
+          if (nd > 1.0) {
+            c.mesh.position.x += (ax/nd) * 4.5 * dt;
+            c.mesh.position.z += (az/nd) * 4.5 * dt;
+            collide(c.mesh.position, 0.25);
+          }
+          c.mesh.rotation.y = Math.atan2(ax, az);
+          // Strike when in range
+          c.attackCooldown = (c.attackCooldown || 0) - dt;
+          if (nd < 1.5 && c.attackCooldown <= 0) {
+            c.swingPhase = 1.0;
+            c.attackCooldown = 0.55 + Math.random() * 0.25;
+            nearest.hp = (nearest.hp ?? 1) - 0.35;
+            blip(220, 0.08, 0.10);
+            if (nearest.hp <= 0) {
+              const idx = entities.indexOf(nearest);
+              if (idx >= 0) entities.splice(idx, 1);
+              if (levelGroup) levelGroup.remove(nearest.mesh);
+              const line = `${c.name} 解决了一个！`;
+              say(line, 3);
+              speak('旁白', line);
+              blip(660, 0.2, 0.15); setTimeout(() => blip(990, 0.25, 0.12), 80);
+            }
+          }
+        }
+        // Swing animation: rotate the right elbow forward through one arc
+        if (c.swingPhase > 0) {
+          const elbowGroup = rig.rightArm.children.find(o => o.isGroup);
+          if (elbowGroup) elbowGroup.rotation.x = -1.2 * Math.sin(c.swingPhase * Math.PI);
+          c.swingPhase = Math.max(0, c.swingPhase - dt * 4);
+          if (c.swingPhase === 0) {
+            const elbowGroup = rig.rightArm.children.find(o => o.isGroup);
+            if (elbowGroup) elbowGroup.rotation.x = 0;
+          }
+        }
+      }
     }
   }
 
@@ -2377,7 +2660,8 @@ function tick() {
       const dx = next.x - w.x, dz = next.z - w.z;
       if (Math.abs(dx) < w.half + 0.4 && Math.abs(dz) < w.half + 0.4) { blocked = true; break; }
     }
-    if (!blocked) e.mesh.position.copy(next);
+    let moved = false;
+    if (!blocked) { e.mesh.position.copy(next); moved = true; }
     else {
       for (const a of [Math.PI/2, -Math.PI/2, Math.PI]) {
         const dd = v.clone().applyAxisAngle(new THREE.Vector3(0,1,0), a);
@@ -2387,10 +2671,45 @@ function tick() {
           const dx = n2.x - w.x, dz = n2.z - w.z;
           if (Math.abs(dx) < w.half + 0.4 && Math.abs(dz) < w.half + 0.4) { b2 = true; break; }
         }
-        if (!b2) { e.mesh.position.copy(n2); break; }
+        if (!b2) { e.mesh.position.copy(n2); moved = true; break; }
       }
     }
     e.mesh.lookAt(pp.x, e.mesh.position.y, pp.z);
+
+    // Shambling rig animation — skip for far figures to save cost
+    const rig = e.mesh.userData.rig;
+    if (rig) {
+      const camDx = e.mesh.position.x - pp.x;
+      const camDz = e.mesh.position.z - pp.z;
+      if (camDx*camDx + camDz*camDz < 32 * 32) {
+        e.walkPhase = (e.walkPhase || 0) + dt * (moved ? 5.5 : 1.2);
+        const sw = moved ? Math.sin(e.walkPhase) * 0.45 : Math.sin(e.walkPhase) * 0.06;
+        rig.leftLeg.rotation.x  =  sw;
+        rig.rightLeg.rotation.x = -sw;
+        // Arms hover forward in a predatory reach, with a slight sway
+        rig.leftArm.rotation.x  = -0.55 + sw * 0.35;
+        rig.rightArm.rotation.x = -0.55 - sw * 0.35;
+        if (rig.skirt) rig.skirt.rotation.z = Math.sin(e.walkPhase * 0.6) * 0.06;
+        // Slow head tilt + breathing
+        rig.head.rotation.z = Math.sin(t * 1.1 + e.walkPhase) * 0.07;
+        if (rig.torso) {
+          const br = 1 + Math.sin(t * 1.6 + e.walkPhase) * 0.04;
+          rig.torso.scale.set(br, 1, br * 0.85);
+        }
+        // Eyes track the player
+        if (rig.lEyeball && rig.rEyeball) {
+          const local = e.mesh.worldToLocal(pp.clone());
+          const yaw = THREE.MathUtils.clamp(Math.atan2(local.x, -local.z) * 0.5, -0.4, 0.4);
+          rig.lEyeball.rotation.y = yaw;
+          rig.rEyeball.rotation.y = yaw;
+        }
+        // Jaw gnashing when close
+        if (rig.mouth) {
+          const open = dist < 6 ? 1 + Math.abs(Math.sin(t * 9)) * 1.6 : 1;
+          rig.mouth.scale.y = open;
+        }
+      }
+    }
 
     if (dist < 1.0 && deathScreen.style.display !== 'flex') {
       player.hp -= dt * 0.6;
