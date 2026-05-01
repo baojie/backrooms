@@ -95,7 +95,8 @@
       <span class="key">鼠标</span> 视角<br>
       <span class="key">F</span> 手电筒 &nbsp;
       <span class="key">E</span> 互动（楼梯/电梯）&nbsp;
-      <span class="key">空格 / 左键</span> 挥刀<br>
+      <span class="key">左键</span> 开枪 (无限子弹) &nbsp;
+      <span class="key">空格</span> 挥刀<br>
       <span class="key">ESC</span> 释放鼠标
     </p>
     <p style="margin-top:14px; font-size:12px; color:#a89570;">
@@ -278,6 +279,9 @@ const player = {
   almondsCollected: 0,
   hasKnife: false,
   knifeSwing: 0,
+  gunRecoil: 0,
+  shotsFired: 0,
+  kills: { entities: 0, companions: 0 },
   lastPos: new THREE.Vector3(),
 };
 
@@ -358,6 +362,65 @@ heldKnifePivot.position.set(0.35, -0.30, -0.55);
 heldKnifePivot.rotation.set(-0.2, -0.4, 0.3);
 heldKnifePivot.visible = false;
 camera.add(heldKnifePivot);
+
+// Held pistol (always visible; unlimited bullets)
+function buildPistolMesh() {
+  const g = new THREE.Group();
+  const matBody  = new THREE.MeshLambertMaterial({ color: 0x1a1a1c });
+  const matSlide = new THREE.MeshLambertMaterial({ color: 0x2a2a2e });
+  const matGrip  = new THREE.MeshLambertMaterial({ color: 0x14100c });
+  const matAccent= new THREE.MeshBasicMaterial({ color: 0x666666 });
+  // Slide (top of gun)
+  const slide = new THREE.Mesh(new THREE.BoxGeometry(0.06, 0.07, 0.32), matSlide);
+  slide.position.set(0, 0.04, -0.06);
+  g.add(slide);
+  // Frame (below slide)
+  const frame = new THREE.Mesh(new THREE.BoxGeometry(0.05, 0.05, 0.28), matBody);
+  frame.position.set(0, -0.01, -0.04);
+  g.add(frame);
+  // Barrel tip
+  const barrel = new THREE.Mesh(new THREE.CylinderGeometry(0.018, 0.018, 0.05, 10), matBody);
+  barrel.rotation.x = Math.PI / 2;
+  barrel.position.set(0, 0.04, -0.245);
+  g.add(barrel);
+  const muzzle = new THREE.Mesh(new THREE.RingGeometry(0.015, 0.022, 10), matAccent);
+  muzzle.position.set(0, 0.04, -0.275);
+  muzzle.rotation.y = Math.PI;
+  g.add(muzzle);
+  // Grip
+  const grip = new THREE.Mesh(new THREE.BoxGeometry(0.05, 0.18, 0.08), matGrip);
+  grip.position.set(0, -0.12, 0.06);
+  grip.rotation.x = -0.18;
+  g.add(grip);
+  // Trigger guard
+  const guard = new THREE.Mesh(new THREE.TorusGeometry(0.04, 0.008, 6, 12, Math.PI), matBody);
+  guard.position.set(0, -0.04, 0.02);
+  guard.rotation.x = -Math.PI / 2;
+  guard.rotation.z = Math.PI;
+  g.add(guard);
+  // Trigger
+  const trigger = new THREE.Mesh(new THREE.BoxGeometry(0.012, 0.04, 0.012), matAccent);
+  trigger.position.set(0, -0.045, 0.02);
+  g.add(trigger);
+  // Front sight
+  const sight = new THREE.Mesh(new THREE.BoxGeometry(0.008, 0.012, 0.01), matAccent);
+  sight.position.set(0, 0.085, -0.21);
+  g.add(sight);
+  // Muzzle flash sprite (toggled per shot)
+  const flashMat = new THREE.MeshBasicMaterial({ color: 0xfff2a0, transparent: true, opacity: 0.0 });
+  const flash = new THREE.Mesh(new THREE.SphereGeometry(0.06, 8, 6), flashMat);
+  flash.position.set(0, 0.04, -0.31);
+  flash.scale.set(1.2, 1.2, 0.6);
+  g.add(flash);
+  g.userData.flash = flash;
+  return g;
+}
+const heldPistolPivot = new THREE.Group();
+const heldPistol = buildPistolMesh();
+heldPistolPivot.add(heldPistol);
+heldPistolPivot.position.set(0.30, -0.28, -0.50);
+heldPistolPivot.rotation.set(0, -0.05, 0);
+camera.add(heldPistolPivot);
 
 // ============================================================
 // Web-resourced humanoid model (Soldier.glb from Three.js examples)
@@ -1431,23 +1494,401 @@ const whispers = [
   '……出口在更深处……',
 ];
 
-const COMPANION_LINES_GENERIC = [
-  '这地方不对劲。',
-  '我们得快点。',
-  '我听见有东西在墙后面。',
-  '跟紧点别走散。',
-  '我害怕……',
-  '这是几楼了？',
-  '有杏仁水，先喝点。',
-  '楼梯在最远的角落。',
-  '别让灯灭了。',
-  '它在追我们。',
-  '别回头看。',
-  '我想回家……',
-  '前面好像有东西。',
-  '我有点冷。',
-  '不要分开。',
-];
+// ============================================================
+// Conversation library — combinatorial templates produce 1000+
+// unique Chinese lines split across speakers, floors and contexts.
+// ============================================================
+function expand(...parts) {
+  if (parts.length === 0) return [''];
+  const [first, ...rest] = parts;
+  const tail = expand(...rest);
+  const out = [];
+  for (const a of first) for (const r of tail) out.push(a + r);
+  return out;
+}
+function fromTemplates(templates) {
+  const out = [];
+  for (const t of templates) for (const s of expand(...t)) out.push(s);
+  return out;
+}
+
+// ---------- 小王 (steady, observant) ----------
+const LINES_XW_GENERIC = fromTemplates([
+  [['', '说真的，', '我跟你说，', '老实讲，'],
+   ['这里', '这地方', '这一片', '这层楼'],
+   ['不对劲。', '让人发毛。', '让我心慌。', '太安静了。', '气氛不对。']],
+  [['我们', '咱们'], ['得', '该', '必须'],
+   ['加快', '快走', '提速', '走快'], ['点。', '一些。', '别拖。']],
+  [['跟紧', '别拉开', '靠近'], ['一点', '一些'],
+   ['，别走散。', '，怕走丢。', '，我看不清你。']],
+  [['', '我'], ['好像', '总觉得', '隐约'],
+   ['听见', '听到'], ['什么声响。', '有动静。', '墙里面有东西。', '脚步声。']],
+  [['这', '这迷宫', '这地图'], ['好像在', '一直在', '不停地'],
+   ['变。', '变形。', '换样子。', '骗我们。']],
+  [['', '注意，'], ['前面', '右边', '左边', '拐角'],
+   ['好像有', '可能有', '别管', '小心'], ['东西。', '动静。', '影子。']],
+  [['撑住。', '别慌。', '深呼吸。', '冷静。'],
+   ['', '我也', '一会儿就'], ['', '没事。', '会过去的。']],
+  [['节省', '留点'], ['体力。', '力气。', '杏仁水。']],
+  [['这', '这种'], ['噪音', '嗡鸣', '寂静'],
+   ['让我', '挺'], ['不舒服。', '难受。', '想吐。']],
+  [['手电', '电池'], ['', '可'],
+   ['别', '不能'], ['用太久。', '随便点。', '浪费。']],
+  [['你', '我们', '咱'], ['别', '不要'],
+   ['停下。', '回头。', '看身后。', '碰那东西。']],
+  [['它', '那东西'], ['', '可能'],
+   ['没', '还没'], ['看见我们。', '听见。', '注意到。']],
+  [['我数到三，', '准备好，', '听我口令，', '看准了，'],
+   ['', '我们'], ['', '一起'], ['冲过去。', '跑。', '走。']],
+  [['这盏灯', '那盏灯', '前面那灯'], ['坏了。', '快灭了。', '在闪。', '不太对。']],
+  [['再坚持', '撑过去', '熬过'], ['一会儿。', '这一段。', '这层。']],
+  [['我会保护你的。', '别怕，有我在。', '我先走，你跟上。',
+    '我打头，你殿后。', '别让我看不见你。']],
+  [['脚下', '前方', '右手边', '左手边'],
+   ['有', '小心'], ['坑。', '台阶。', '碎玻璃。', '杂物。', '水洼。']],
+  [['', '深一点呼吸。'], ['别紧张。', '稳住。', '握紧拳头。']],
+  [['', '说不定'], ['出口', '楼梯', '电梯'],
+   ['就在', '可能在'], ['前面。', '附近。', '下个拐弯。']],
+  [['', '我先去', '让我'], ['探一下', '看看', '试试'], ['。', '路。']],
+  [['你脸色不好。', '你还好吗？', '你冷吗？',
+    '你的手在抖。', '你眼神不对。', '需要休息吗？']],
+]);
+
+const LINES_XW_FEAR = fromTemplates([
+  [['', '糟了，'], ['它', '那东西', '声音'],
+   ['', '正在', '已经'], ['靠近了。', '盯上我们了。', '在追。', '在身后。']],
+  [['快', '别犹豫', '现在', '马上'],
+   ['！', '走！', '跑！', '跟上！']],
+  [['别', '千万别'], ['出声', '说话', '吵', '大喘气', '回头'],
+   ['！', '。']],
+  [['它在', '声音在', '气味在'],
+   ['左边。', '右边。', '后面。', '上面。', '下面。']],
+  [['绕开它。', '别正面冲。', '换路。', '从这边走。', '别走直线。']],
+]);
+
+const LINES_XW_SAFE = fromTemplates([
+  [['暂时', '这一段', '这一会儿', '现在'],
+   ['安全。', '没事了。', '可以喘口气。']],
+  [['好像', '似乎', '看起来'],
+   ['没事了。', '它走了。', '没跟上来。', '甩掉它了。']],
+  [['深呼吸。', '坐一下。', '靠这墙歇一下。',
+    '检查一下你的伤。', '把杏仁水喝了。']],
+]);
+
+const LINES_XW_ITEM = fromTemplates([
+  [['你拿到杏仁水了，', '喝完那瓶，', '吃完了，'],
+   ['', '感觉'], ['好点了吗？', '清醒了吗？', '能跑吗？']],
+  [['我给你看着，', '我先不喝，'],
+   ['你', '你先'], ['喝。', '补一下。']],
+  [['这瓶', '那瓶'], ['看起来', '闻起来'],
+   ['还行。', '有点怪。', '过期了吧。', '能喝。']],
+]);
+
+// ---------- 小李 (anxious, expressive) ----------
+const LINES_XL_GENERIC = fromTemplates([
+  [['', '我跟你说，', '哎，'],
+   ['我害怕。', '我好怕。', '我撑不住了。', '我想哭。', '我腿软了。']],
+  [['这', '这种'], ['味道', '气味', '声音'],
+   ['好', '太'], ['熟悉了。', '陌生了。', '难闻了。', '可怕了。']],
+  [['这是', '咱们到'], ['第几层', '哪一层'],
+   ['了？', '了啊？']],
+  [['会', '能'], ['出去', '回家', '醒过来'],
+   ['吧？', '吗？', '的吧？']],
+  [['你', '哥', '老王'], ['', '别'],
+   ['离我太远。', '走那么快。', '不说话啊。', '一个人去。']],
+  [['我', '俺'], ['脚', '腿', '胳膊', '心脏', '胃'],
+   ['有点', '很', '一直在'],
+   ['酸。', '抖。', '跳得快。', '难受。', '没力气。']],
+  [['这', '那'], ['灯', '声响', '影子', '风'],
+   ['真讨厌。', '吓死我了。', '让我起鸡皮疙瘩。', '不太对。']],
+  [['我妈', '我女朋友', '我家狗', '我同事'],
+   ['', '应该'], ['正在', '会'],
+   ['找我吧。', '担心我。', '哭。', '报警了吧。']],
+  [['', '不知道为什么，'],
+   ['我', '我刚刚'], ['想起', '梦见'],
+   ['小时候。', '一只猫。', '一首歌。', '加班的事。']],
+  [['你', '我们'], ['看', '听', '闻'],
+   ['到了吗？', '到那个了？', '了那玩意？']],
+  [['好饿。', '好困。', '好渴。', '我想睡。', '我想吐。', '我头好晕。']],
+  [['', '说真的，'], ['我', '咱'],
+   ['不该来这里。', '怎么混到这地步。', '是不是死了。', '是不是疯了。']],
+  [['这', '这墙', '这地毯', '这天花板'],
+   ['', '在'], ['动。', '呼吸。', '说话。', '看着我。']],
+  [['我们能不能', '我能不能', '哥能不能'],
+   ['', '稍微'], ['停一下。', '歇歇。', '抱一下。', '坐下。']],
+  [['真的有', '真的会有'],
+   ['楼梯', '电梯', '出口', '终点'],
+   ['吗？', '吧？']],
+  [['我手机没信号。', '我表停了。', '我手电不亮。',
+    '我钱包不见了。', '我不知道时间了。']],
+  [['为什么', '凭什么'],
+   ['是', '偏偏是'], ['我们。', '我。', '咱俩。']],
+  [['你', '哥'], ['头发', '脸色', '眼神'],
+   ['', '都'], ['不对了。', '变了。', '吓我。']],
+  [['', '说真的，'], ['这一层', '上一层'],
+   ['', '比刚才'], ['更糟。', '更安静。', '更冷。', '更暗。']],
+  [['', '哎，'], ['你', '你刚才'],
+   ['说什么了？', '听见我说话吗？', '看到我了吗？']],
+  [['等等我！', '别走那么快！', '我跟不上！', '哥别丢下我！', '我求你了！']],
+]);
+
+const LINES_XL_FEAR = fromTemplates([
+  [['它来了！', '它过来了！', '它看见我们了！',
+    '它要抓我了！', '别让它碰我！']],
+  [['救命！', '救我！', '哥救我！', '别走！', '快！']],
+  [['完了完了……', '糟了糟了……', '不行了不行了……',
+    '我不行了……', '我跑不动了……']],
+  [['它在', '那东西在'],
+   ['后面！', '上面！', '右边！', '左边！', '里面！']],
+  [['对不起，', '抱歉，', '我错了，'],
+   ['我', '我刚刚'], ['', '差点'], ['停下了。', '走错了。', '丢了东西。']],
+]);
+
+const LINES_XL_SAFE = fromTemplates([
+  [['总算', '终于', '幸好'],
+   ['过去了。', '安全了。', '甩掉了。']],
+  [['我心都', '我手都', '我腿都'],
+   ['', '还在'], ['抖。', '软。', '不听使唤。']],
+  [['', '哥，'], ['谢谢你。', '辛苦了。', '没你我早完了。']],
+]);
+
+const LINES_XL_ITEM = fromTemplates([
+  [['', '哥，'], ['杏仁水', '这水', '这瓶'],
+   ['', '真'], ['救命。', '管用。', '甜。', '好喝。']],
+  [['我', '咱'], ['再找几瓶。', '多拿点。', '存着。']],
+  [['你也', '你先'], ['喝点。', '补一下。', '尝尝。']],
+]);
+
+// ---------- Floor-specific lines ----------
+const _floorTemplates = {
+  0: { // 黄色房间
+    xw: [
+      [['这', '这种'], ['黄色', '壁纸', '日光灯'],
+       ['', '让我'], ['看吐了。', '头晕。', '睡不着。', '想起出租屋。']],
+      [['地毯', '潮气', '空气'], ['', '很'],
+       ['湿。', '霉。', '臭。', '黏。']],
+      [['这电', '这灯'], ['一直', '总是'],
+       ['闪。', '嗡嗡响。', '让我心烦。']],
+    ],
+    xl: [
+      [['好黄。', '黄到我恶心。', '怎么全是黄的。',
+        '好像被关在尿布里。', '这墙糊了什么？']],
+      [['地毯', '鞋底', '裤腿'], ['好', '都'],
+       ['湿。', '黏。', '脏了。']],
+      [['你听这个嗡嗡声！', '灯一闪我就抖一下。',
+        '蜜蜂窝吗这是？']],
+    ]
+  },
+  1: { // 车库
+    xw: [
+      [['这味', '汽油味', '机油味'],
+       ['很', '挺'], ['呛。', '熟悉。', '难闻。']],
+      [['车里', '后备箱', '驾驶座'],
+       ['别', '不要'], ['看。', '伸手。', '碰。']],
+      [['水泥地', '油渍', '柱子'], ['', '挺'],
+       ['滑。', '碍事。', '挡视线。']],
+    ],
+    xl: [
+      [['好多车……', '哪辆是真的？', '会不会有人？',
+        '那辆开着大灯诶。']],
+      [['汽油味', '柴油味'], ['熏死我了。', '我都晕了。']],
+      [['咯吱咯吱的，', '扑通一声，', '哐当一下，'],
+       ['是', '听见了吗，'], ['哪里？', '车里？', '柱子后面？']],
+    ]
+  },
+  2: { // 发电厂
+    xw: [
+      [['别', '千万别'], ['碰', '靠近', '踩'],
+       ['电缆。', '配电箱。', '裸线。', '湿地面。']],
+      [['火花', '弧光'], ['', '挺'], ['吓人。', '危险。', '亮。']],
+      [['噪音太大，', '机器太响，'],
+       ['', '我'], ['听不见你。', '说话听不清。']],
+    ],
+    xl: [
+      [['会不会触电？', '这线是断的吗？',
+        '我闻到焦味……', '我头发都竖起来了。']],
+      [['电！', '小心！', '别动！'], ['', '别再走了。']],
+      [['这是个变电站？', '发电厂？', '机房？',
+        '我们在哪里啊。']],
+    ]
+  },
+  3: { // 游泳池
+    xw: [
+      [['水', '池子'], ['', '可能'],
+       ['很深。', '不能淌。', '有东西。', '回声大。']],
+      [['氯气', '消毒水', '潮气'],
+       ['味道', '气味'], ['很重。', '熏眼睛。', '难闻。']],
+      [['水声', '回声'], ['会', '能'],
+       ['暴露我们。', '招它来。', '盖住脚步。']],
+    ],
+    xl: [
+      [['好像无边泳池啊……', '真大。', '真蓝。',
+        '我都想跳下去了。']],
+      [['可不能下水。', '我不会游泳。', '泳衣呢？',
+        '袜子湿了。']],
+      [['你听这回声！', '哎呀我说话都飘了！',
+        '咱们在大澡堂里。']],
+    ]
+  },
+  4: { // 农场
+    xw: [
+      [['天空', '云', '阳光'],
+       ['', '都'], ['是假的。', '不动。', '不对劲。', '太干净。']],
+      [['这片', '这'], ['麦田', '玉米地', '草地'],
+       ['很', '太'], ['静。', '空。', '怪。']],
+      [['有动静。', '麦穗在抖。', '有什么藏在里面。',
+        '别走进去。']],
+    ],
+    xl: [
+      [['好漂亮……', '居然有蓝天！', '我想在这里躺一天。',
+        '是真的太阳吗？']],
+      [['那是稻草人吗？', '那个是不是动了？',
+        '它刚刚转头了！']],
+      [['我闻到牛粪了，', '土味，', '青草味，'],
+       ['', '挺'], ['亲切的。', '熟悉的。']],
+    ]
+  },
+  5: { // 幼儿园
+    xw: [
+      [['', '这玩具，'],
+       ['别', '不要'], ['碰。', '捡。', '看太久。']],
+      [['儿歌', '童声', '笑声'],
+       ['', '不像'], ['真的。', '正常。', '小孩唱的。']],
+      [['这种', '这片'], ['粉色', '装饰', '布置'],
+       ['', '挺'], ['假。', '吓人。', '过头了。']],
+    ],
+    xl: [
+      [['好恐怖啊。', '为什么幼儿园这么吓人。',
+        '我又想哭。', '这熊娃娃眼睛看我！']],
+      [['你听到童谣了吗？', '哪里在唱歌？',
+        '这是录音吗？']],
+      [['滑梯上', '木马上', '黑板上'],
+       ['', '好像'], ['有人。', '有血。', '写着字。']],
+    ]
+  },
+  6: { // 办公室
+    xw: [
+      [['', '电脑'], ['别', '不要'],
+       ['乱碰。', '看屏幕。', '点开。']],
+      [['打印机', '复印机', '电话'],
+       ['一直在', '突然'], ['响。', '动。', '工作。']],
+      [['工位', '隔间'], ['里', ''],
+       ['', '可能'], ['有东西。', '有人。', '别探头。']],
+    ],
+    xl: [
+      [['好像我加班的公司。', '怎么这么多人？', '没人。',
+        '到处是空椅子。']],
+      [['这是什么会议？', '邮件还在响诶！',
+        '咖啡机居然能用！']],
+      [['打卡机', '门禁', '工牌'], ['还能', '居然能'],
+       ['用？', '响？', '过？']],
+    ]
+  },
+  7: { // 图书馆
+    xw: [
+      [['书', '书架'], ['别', '不要'],
+       ['乱抽。', '翻。', '撞。']],
+      [['', '这种'], ['灰尘', '霉味', '安静'],
+       ['', '让我'], ['打喷嚏。', '想睡。', '心慌。']],
+      [['书脊', '页码', '索引'],
+       ['对不上。', '是乱的。', '在变。']],
+    ],
+    xl: [
+      [['好多书啊！', '我喜欢这里。', '能不能借一本走？',
+        '这书写的是中文吗？']],
+      [['你听到翻书声没？', '没人却在翻。',
+        '上面有人。']],
+      [['这味道', '这光', '这安静'],
+       ['', '挺'], ['像我中学。', '舒服。', '怪温柔。']],
+    ]
+  },
+  8: { // 地铁站
+    xw: [
+      [['铁轨', '黄线'], ['别', '不要'],
+       ['踩。', '过去。', '靠太近。']],
+      [['隧道里', '远处'], ['好像', '似乎'],
+       ['有风。', '有灯。', '有声响。']],
+      [['末班车', '调度', '广播'],
+       ['', '可能'], ['是假的。', '别信。', '是诱饵。']],
+    ],
+    xl: [
+      [['末班车几点啊？', '怎么没人查票？',
+        '会不会真的来车？']],
+      [['隧道里有风诶！', '黑乎乎的。',
+        '不会有列车冲出来吧？']],
+      [['我以前', '我大学'], ['', '就'],
+       ['坐这条线。', '住这站附近。', '在这里加过班。']],
+    ]
+  },
+  9: { // 终焉
+    xw: [
+      [['', '看到那束光了？'],
+       ['坚持', '撑'], ['住。', '一下。', '到最后。']],
+      [['不要', '别'], ['停。', '回头。', '害怕。', '说话。']],
+      [['终点', '出口'], ['就', '近'],
+       ['在前面。', '了。', '在这里。']],
+    ],
+    xl: [
+      [['好黑啊……', '看不见你！',
+        '哥你在吗？', '那是亮的吗？']],
+      [['终于到头了？', '是不是结束了？',
+        '我活着出去了？']],
+      [['我哭了。', '我太累了。', '我想睡个十年。',
+        '回家以后我天天吃火锅。']],
+    ]
+  }
+};
+const FLOOR_LINES = {};
+for (const k of Object.keys(_floorTemplates)) {
+  const ft = _floorTemplates[k];
+  FLOOR_LINES[k] = { xw: fromTemplates(ft.xw), xl: fromTemplates(ft.xl) };
+}
+
+const COMPANION_LINE_LIB = {
+  '小王': {
+    generic: LINES_XW_GENERIC, fear: LINES_XW_FEAR,
+    safe: LINES_XW_SAFE, item: LINES_XW_ITEM,
+    floor: Object.fromEntries(Object.entries(FLOOR_LINES).map(([k,v]) => [k, v.xw])),
+  },
+  '小李': {
+    generic: LINES_XL_GENERIC, fear: LINES_XL_FEAR,
+    safe: LINES_XL_SAFE, item: LINES_XL_ITEM,
+    floor: Object.fromEntries(Object.entries(FLOOR_LINES).map(([k,v]) => [k, v.xl])),
+  },
+};
+
+const _totalLines = Object.values(COMPANION_LINE_LIB).reduce((acc, sp) => {
+  let n = sp.generic.length + sp.fear.length + sp.safe.length + sp.item.length;
+  for (const f of Object.values(sp.floor)) n += f.length;
+  return acc + n;
+}, 0);
+console.log('[lines] total companion conversation pool:', _totalLines);
+
+function pickCompanionLine(speakerName) {
+  const lib = COMPANION_LINE_LIB[speakerName];
+  if (!lib) return '……';
+  const pp = controls.getObject().position;
+  let nearestEntity = Infinity;
+  for (const e of entities) {
+    const d = e.mesh.position.distanceTo(pp);
+    if (d < nearestEntity) nearestEntity = d;
+  }
+  const inFear = nearestEntity < 9 || player.sanity < 0.35 || player.hp < 0.4;
+  const inSafe = nearestEntity > 22 && player.sanity > 0.85 && player.hp > 0.85;
+  const justAteAlmond = player.speedBoost > 5;
+
+  let pool;
+  if (justAteAlmond && lib.item.length && Math.random() < 0.6) pool = lib.item;
+  else if (inFear && lib.fear.length && Math.random() < 0.7)   pool = lib.fear;
+  else if (inSafe && lib.safe.length && Math.random() < 0.5)   pool = lib.safe;
+  else if (Math.random() < 0.35 && lib.floor[currentLevel] && lib.floor[currentLevel].length)
+    pool = lib.floor[currentLevel];
+  else pool = lib.generic;
+  return pool[Math.floor(Math.random() * pool.length)];
+}
+
+// Compatibility shim — older code references this name.
+const COMPANION_LINES_GENERIC = LINES_XW_GENERIC.concat(LINES_XL_GENERIC);
 
 // ============================================================
 // Input
@@ -1527,7 +1968,7 @@ addEventListener('keydown', e => {
 addEventListener('keyup', e => keys[e.code] = false);
 addEventListener('mousedown', e => {
   if (e.button !== 0) return;
-  if (controls.isLocked) { trySwingKnife(); return; }
+  if (controls.isLocked) { fireGun(); return; }
   // If overlay is hidden but pointer lock was lost, re-acquire on click
   if (overlay.style.display === 'none'
       && deathScreen.style.display !== 'flex'
@@ -1536,6 +1977,60 @@ addEventListener('mousedown', e => {
     try { controls.lock(); } catch {}
   }
 });
+
+const _gunRay = new THREE.Raycaster();
+const _gunOrigin = new THREE.Vector2(0, 0);
+function fireGun() {
+  if (player.gunRecoil > 0.05) return; // small fire-rate cap
+  player.gunRecoil = 0.18;
+  player.shotsFired++;
+  blip(900, 0.05, 0.28); blip(220, 0.10, 0.20);
+  // Muzzle flash
+  const flash = heldPistol.userData.flash;
+  if (flash) {
+    flash.material.opacity = 1.0;
+    setTimeout(() => { flash.material.opacity = 0; }, 60);
+  }
+  // Screen flash subtle
+  flashEl.style.opacity = '0.12';
+  setTimeout(() => flashEl.style.opacity = '0', 50);
+
+  // Build candidate target list
+  const targets = [];
+  for (const c of companions) if (c.alive && c.mesh) targets.push({ mesh: c.mesh, kind: 'companion', ref: c });
+  for (const e of entities) if (e.mesh) targets.push({ mesh: e.mesh, kind: 'entity', ref: e });
+  if (!targets.length) return;
+
+  _gunRay.setFromCamera(_gunOrigin, camera);
+  _gunRay.far = 80;
+  const hits = _gunRay.intersectObjects(targets.map(t => t.mesh), true);
+  if (!hits.length) return;
+
+  // Walk up parent chain to find which root group was hit
+  let obj = hits[0].object;
+  let target = null;
+  while (obj && !target) {
+    target = targets.find(t => t.mesh === obj);
+    obj = obj.parent;
+  }
+  if (!target) return;
+
+  if (target.kind === 'entity') {
+    levelGroup.remove(target.ref.mesh);
+    target.ref.mesh = null;
+    player.kills.entities++;
+    say('击中怪物！', 1.5);
+    playStatic();
+    entities = entities.filter(e => e.mesh);
+  } else {
+    target.ref.alive = false;
+    levelGroup.remove(target.ref.mesh);
+    target.ref.mesh = null;
+    player.kills.companions++;
+    player.sanity = Math.max(0, player.sanity - 0.10);
+    say(`你射杀了 ${target.ref.name}……`, 3);
+  }
+}
 
 function trySwingKnife() {
   if (!player.hasKnife || player.knifeSwing > 0) return;
@@ -1641,6 +2136,8 @@ function resetAll() {
   player.flashlightBattery = 1; player.flashlightOn = false;
   player.totalDist = 0; player.speedBoost = 0; player.almondsCollected = 0;
   player.hasKnife = false; player.knifeSwing = 0;
+  player.gunRecoil = 0; player.shotsFired = 0;
+  player.kills = { entities: 0, companions: 0 };
   heldKnifePivot.visible = false;
   for (const c of companions) { c.hp = 1; c.alive = true; }
   buildLevel(0);
@@ -1755,9 +2252,19 @@ function tick() {
     heldKnifePivot.rotation.x = -0.2 - swing * 1.4;
     heldKnifePivot.rotation.z =  0.3 - swing * 0.6;
   } else if (player.hasKnife) {
-    // Idle bob
     heldKnifePivot.rotation.x = -0.2 + Math.sin(t * 1.6) * 0.03;
     heldKnifePivot.rotation.z =  0.3 + Math.sin(t * 1.2) * 0.02;
+  }
+
+  // Pistol recoil + idle bob
+  if (player.gunRecoil > 0) {
+    player.gunRecoil = Math.max(0, player.gunRecoil - dt);
+    const k = player.gunRecoil / 0.18;
+    heldPistolPivot.rotation.x = -k * 0.45;
+    heldPistolPivot.position.z = -0.50 + k * 0.06;
+  } else {
+    heldPistolPivot.rotation.x = Math.sin(t * 1.5) * 0.02;
+    heldPistolPivot.position.z = -0.50 + Math.sin(t * 1.2) * 0.005;
   }
 
   flashlight.intensity = (player.flashlightOn && player.flashlightBattery > 0) ? 40 : 0;
@@ -1832,7 +2339,7 @@ function tick() {
     const alive = companions.filter(c => c.alive);
     if (alive.length) {
       const c = alive[Math.floor(Math.random()*alive.length)];
-      const raw = COMPANION_LINES_GENERIC[Math.floor(Math.random()*COMPANION_LINES_GENERIC.length)];
+      const raw = pickCompanionLine(c.name);
       const line = `${c.name}：「${raw}」`;
       say(line, 4);
       speak(c.name, line);
