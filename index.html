@@ -436,108 +436,185 @@ function buildCompanionMesh(palette, _ignored = undefined, name = null) {
   return g;
 }
 
-// Shared geometries (one allocation, reused across all 100 figures)
+// Shared geometries — one allocation reused across all 100 figures.
 const FG = (() => ({
-  head:    new THREE.SphereGeometry(0.13, 14, 12),
-  hairCap: new THREE.SphereGeometry(0.135, 14, 12, 0, Math.PI*2, 0, Math.PI*0.62),
-  hairBack: new THREE.CylinderGeometry(0.13, 0.18, 0.85, 10, 1, true),
-  bow:     new THREE.TorusGeometry(0.06, 0.022, 6, 10),
-  torso:   new THREE.CapsuleGeometry(0.13, 0.32, 4, 8),
-  dress:   new THREE.ConeGeometry(0.42, 0.85, 14, 1, true),
-  arm:     new THREE.CapsuleGeometry(0.045, 0.42, 3, 8),
-  shoe:    new THREE.BoxGeometry(0.10, 0.05, 0.18),
-  eye:     new THREE.SphereGeometry(0.018, 8, 6),
-  lips:    new THREE.BoxGeometry(0.05, 0.008, 0.008),
-  cheek:   new THREE.SphereGeometry(0.022, 8, 6),
+  skull:    new THREE.SphereGeometry(0.16, 16, 14),
+  hairCap:  new THREE.SphereGeometry(0.165, 16, 14, 0, Math.PI*2, 0, Math.PI*0.55),
+  hairBack: new THREE.CylinderGeometry(0.16, 0.21, 0.95, 12, 1, true),
+  hairFringe: new THREE.BoxGeometry(0.30, 0.06, 0.04),
+  bow:      new THREE.TorusGeometry(0.07, 0.022, 6, 10),
+  ear:      new THREE.SphereGeometry(0.035, 8, 8),
+  neck:     new THREE.CylinderGeometry(0.065, 0.075, 0.10, 10),
+  torsoUp:  new THREE.CapsuleGeometry(0.18, 0.32, 4, 10),  // slim feminine torso
+  bust:     new THREE.SphereGeometry(0.085, 10, 8),
+  hipBlock: new THREE.CylinderGeometry(0.18, 0.16, 0.16, 12),
+  skirt:    new THREE.ConeGeometry(0.36, 0.55, 16, 1, true),
+  armUpper: new THREE.CapsuleGeometry(0.055, 0.28, 3, 8),
+  armFore:  new THREE.CapsuleGeometry(0.05, 0.26, 3, 8),
+  hand:     new THREE.SphereGeometry(0.062, 8, 8),
+  legUpper: new THREE.CapsuleGeometry(0.075, 0.30, 3, 8),
+  legLower: new THREE.CapsuleGeometry(0.062, 0.28, 3, 8),
+  shoe:     new THREE.BoxGeometry(0.13, 0.05, 0.22),
+  eyeWhite: new THREE.SphereGeometry(0.028, 10, 8),
+  pupil:    new THREE.SphereGeometry(0.013, 8, 6),
+  brow:     new THREE.BoxGeometry(0.05, 0.010, 0.010),
+  nose:     new THREE.ConeGeometry(0.018, 0.05, 4),
+  lips:     new THREE.BoxGeometry(0.055, 0.011, 0.010),
+  cheek:    new THREE.SphereGeometry(0.024, 8, 6),
 }))();
 
 function buildFemaleCompanion(palette) {
   const g = new THREE.Group();
   const skin    = new THREE.MeshLambertMaterial({ color: palette.skinColor });
-  const dressM  = new THREE.MeshLambertMaterial({ color: palette.dressColor, side: THREE.DoubleSide });
-  const torsoM  = new THREE.MeshLambertMaterial({ color: palette.dressColor });
+  const dressM  = new THREE.MeshLambertMaterial({ color: palette.dressColor });
+  const skirtM  = new THREE.MeshLambertMaterial({ color: palette.dressColor, side: THREE.DoubleSide });
   const hairM   = new THREE.MeshLambertMaterial({ color: palette.hairColor });
   const accentM = new THREE.MeshLambertMaterial({ color: palette.accentColor });
-  const eyeM    = new THREE.MeshBasicMaterial({ color: 0x1a1418 });
-  const lipM    = new THREE.MeshBasicMaterial({ color: 0xc24a5a });
-  const blushM  = new THREE.MeshBasicMaterial({ color: 0xf2a8b0, transparent: true, opacity: 0.55 });
+  const shoeM   = new THREE.MeshLambertMaterial({ color: 0x202024 });
+  const eyeWhiteM = new THREE.MeshBasicMaterial({ color: 0xffffff });
+  const pupilM    = new THREE.MeshBasicMaterial({ color: 0x2a1f1a });
+  const lipM      = new THREE.MeshBasicMaterial({ color: 0xc44a5a });
+  const blushM    = new THREE.MeshBasicMaterial({ color: 0xf2a8b0, transparent: true, opacity: 0.55 });
 
-  // Dress (skirt) — widens toward ankles
-  const dress = new THREE.Mesh(FG.dress, dressM);
-  dress.position.y = 0.55;
-  g.add(dress);
-
-  // Slim torso above the dress
-  const torso = new THREE.Mesh(FG.torso, torsoM);
-  torso.position.y = 1.20;
+  // ---- Torso ----
+  const torso = new THREE.Mesh(FG.torsoUp, dressM);
+  torso.position.y = 1.30;
   torso.scale.set(1.0, 1.0, 0.85);
   g.add(torso);
 
-  // Head
+  // Subtle bust
+  const lBust = new THREE.Mesh(FG.bust, dressM); lBust.position.set(-0.08, 1.34, -0.10);
+  const rBust = new THREE.Mesh(FG.bust, dressM); rBust.position.set( 0.08, 1.34, -0.10);
+  lBust.scale.set(0.9, 0.7, 0.9); rBust.scale.set(0.9, 0.7, 0.9);
+  g.add(lBust); g.add(rBust);
+
+  // Hips block (transition between torso and skirt)
+  const hips = new THREE.Mesh(FG.hipBlock, dressM);
+  hips.position.y = 0.92;
+  g.add(hips);
+
+  // Skirt — short cone widening over the upper legs
+  const skirt = new THREE.Mesh(FG.skirt, skirtM);
+  skirt.position.y = 0.62;
+  g.add(skirt);
+
+  // ---- Neck + head ----
+  const neck = new THREE.Mesh(FG.neck, skin);
+  neck.position.y = 1.62;
+  g.add(neck);
+
   const head = new THREE.Group();
-  head.position.y = 1.62;
-  const skull = new THREE.Mesh(FG.head, skin);
+  head.position.y = 1.78;
+  const skull = new THREE.Mesh(FG.skull, skin);
   skull.scale.set(0.95, 1.05, 0.92);
   head.add(skull);
 
-  // Hair: cap + flowing back
+  // Ears
+  const lEar = new THREE.Mesh(FG.ear, skin); lEar.scale.set(0.55, 1.0, 1.0); lEar.position.set(-0.16, 0, 0);
+  const rEar = new THREE.Mesh(FG.ear, skin); rEar.scale.set(0.55, 1.0, 1.0); rEar.position.set( 0.16, 0, 0);
+  head.add(lEar); head.add(rEar);
+
+  // Hair cap + fringe + flowing back
   const hairCap = new THREE.Mesh(FG.hairCap, hairM);
   hairCap.position.y = 0.005;
   head.add(hairCap);
+  const fringe = new THREE.Mesh(FG.hairFringe, hairM);
+  fringe.position.set(0, 0.10, -0.155);
+  fringe.rotation.x = -0.15;
+  head.add(fringe);
   const hairBack = new THREE.Mesh(FG.hairBack, hairM);
-  hairBack.position.set(0, -0.42, 0.025);
-  hairBack.scale.set(1.05, 1.0, 0.65);
+  hairBack.position.set(0, -0.50, 0.04);
+  hairBack.scale.set(1.0, 1.0, 0.55);
   head.add(hairBack);
 
-  // Bow accent on top
+  // Hair bow
   const bow = new THREE.Mesh(FG.bow, accentM);
-  bow.position.set(0.06, 0.13, -0.02);
+  bow.position.set(0.09, 0.15, -0.04);
   bow.rotation.x = Math.PI / 2;
   bow.scale.set(0.9, 0.9, 0.5);
   head.add(bow);
 
-  // Eyes
-  const lEye = new THREE.Mesh(FG.eye, eyeM);
-  const rEye = new THREE.Mesh(FG.eye, eyeM);
-  lEye.position.set(-0.045, 0.01, -0.115);
-  rEye.position.set( 0.045, 0.01, -0.115);
-  head.add(lEye); head.add(rEye);
+  // Eyes (white sclera + pupil group so pupils can glance)
+  const lEyeball = new THREE.Group(); lEyeball.position.set(-0.055, 0.015, -0.140);
+  const rEyeball = new THREE.Group(); rEyeball.position.set( 0.055, 0.015, -0.140);
+  lEyeball.add(new THREE.Mesh(FG.eyeWhite, eyeWhiteM));
+  rEyeball.add(new THREE.Mesh(FG.eyeWhite, eyeWhiteM));
+  const lP = new THREE.Mesh(FG.pupil, pupilM); lP.position.z = -0.020; lEyeball.add(lP);
+  const rP = new THREE.Mesh(FG.pupil, pupilM); rP.position.z = -0.020; rEyeball.add(rP);
+  head.add(lEyeball); head.add(rEyeball);
+
+  // Brows
+  const lBrow = new THREE.Mesh(FG.brow, hairM); lBrow.position.set(-0.055, 0.062, -0.150);
+  const rBrow = new THREE.Mesh(FG.brow, hairM); rBrow.position.set( 0.055, 0.062, -0.150);
+  head.add(lBrow); head.add(rBrow);
+
+  // Nose
+  const nose = new THREE.Mesh(FG.nose, skin);
+  nose.rotation.x = Math.PI / 2;
+  nose.position.set(0, -0.005, -0.165);
+  head.add(nose);
 
   // Lips
   const lips = new THREE.Mesh(FG.lips, lipM);
-  lips.position.set(0, -0.055, -0.122);
+  lips.position.set(0, -0.060, -0.158);
   head.add(lips);
 
   // Blush
   const lCheek = new THREE.Mesh(FG.cheek, blushM); lCheek.scale.set(1, 0.5, 0.4);
   const rCheek = new THREE.Mesh(FG.cheek, blushM); rCheek.scale.set(1, 0.5, 0.4);
-  lCheek.position.set(-0.075, -0.025, -0.115);
-  rCheek.position.set( 0.075, -0.025, -0.115);
+  lCheek.position.set(-0.085, -0.025, -0.140);
+  rCheek.position.set( 0.085, -0.025, -0.140);
   head.add(lCheek); head.add(rCheek);
 
   g.add(head);
 
-  // Arms
+  // ---- Arms (shoulder pivot → upper → elbow → forearm → hand) ----
   function makeArm(side) {
     const arm = new THREE.Group();
-    arm.position.set(side * 0.16, 1.42, 0);
-    const a = new THREE.Mesh(FG.arm, skin);
-    a.position.y = -0.22;
-    arm.add(a);
+    arm.position.set(side * 0.22, 1.50, 0);
+    const upper = new THREE.Mesh(FG.armUpper, dressM); // sleeve
+    upper.position.y = -0.18;
+    arm.add(upper);
+    const elbow = new THREE.Group(); elbow.position.y = -0.36;
+    const fore = new THREE.Mesh(FG.armFore, skin);
+    fore.position.y = -0.18;
+    elbow.add(fore);
+    const hand = new THREE.Mesh(FG.hand, skin);
+    hand.position.y = -0.36;
+    hand.scale.set(0.85, 0.7, 1.0);
+    elbow.add(hand);
+    arm.add(elbow);
     g.add(arm);
     return arm;
   }
-  const leftArm = makeArm(-1);
+  const leftArm  = makeArm(-1);
   const rightArm = makeArm(1);
 
-  // Shoes peeking out from under the dress
-  const lShoe = new THREE.Mesh(FG.shoe, accentM);
-  const rShoe = new THREE.Mesh(FG.shoe, accentM);
-  lShoe.position.set(-0.09, 0.025, 0.04);
-  rShoe.position.set( 0.09, 0.025, 0.04);
-  g.add(lShoe); g.add(rShoe);
+  // ---- Legs (hip pivot → upper → knee → lower → foot) ----
+  function makeLeg(side) {
+    const leg = new THREE.Group();
+    leg.position.set(side * 0.10, 0.82, 0);
+    const upper = new THREE.Mesh(FG.legUpper, skin);
+    upper.position.y = -0.20;
+    leg.add(upper);
+    const knee = new THREE.Group(); knee.position.y = -0.40;
+    const lower = new THREE.Mesh(FG.legLower, skin);
+    lower.position.y = -0.18;
+    knee.add(lower);
+    const foot = new THREE.Mesh(FG.shoe, shoeM);
+    foot.position.set(0, -0.36, 0.05);
+    knee.add(foot);
+    leg.add(knee);
+    g.add(leg);
+    return leg;
+  }
+  const leftLeg  = makeLeg(-1);
+  const rightLeg = makeLeg(1);
 
-  g.userData.rig = { head, leftArm, rightArm, torso, dress, lips, hairBack };
+  g.userData.rig = {
+    head, leftArm, rightArm, leftLeg, rightLeg,
+    torso, skirt, hairBack, lEyeball, rEyeball, lips,
+  };
   return g;
 }
 
@@ -1717,20 +1794,29 @@ function tick() {
     // ---- Feminine procedural rig animation ----
     const rig = c.mesh.userData.rig;
     if (rig) {
-      c.walkPhase += dt * (walking ? 7 : 1.5);
+      c.walkPhase += dt * (walking ? 8 : 1.5);
       const sw = walking ? Math.sin(c.walkPhase) * 0.55 : Math.sin(c.walkPhase) * 0.04;
-      rig.leftArm.rotation.x  = -sw;
-      rig.rightArm.rotation.x =  sw;
-      // Subtle dress sway
-      if (rig.dress) rig.dress.rotation.z = Math.sin(c.walkPhase * 0.6) * 0.06;
-      // Hair sway
+      rig.leftLeg.rotation.x  =  sw;
+      rig.rightLeg.rotation.x = -sw;
+      rig.leftArm.rotation.x  = -sw * 0.7;
+      rig.rightArm.rotation.x =  sw * 0.7;
+      // Skirt sway
+      if (rig.skirt) rig.skirt.rotation.z = Math.sin(c.walkPhase * 0.6) * 0.05;
+      // Long hair sway
       if (rig.hairBack) rig.hairBack.rotation.x = Math.sin(c.walkPhase * 0.7) * 0.08;
       // Breathing
       if (rig.torso) {
         const br = 1 + Math.sin(t * 1.4 + c.bobSeed) * 0.03;
         rig.torso.scale.set(br, 1, br * 0.85);
       }
-      // Talking: head bob
+      // Eye-tracking pupils glance toward player
+      if (rig.lEyeball && rig.rEyeball) {
+        const local = c.mesh.worldToLocal(pp.clone());
+        const yaw = THREE.MathUtils.clamp(Math.atan2(local.x, -local.z) * 0.4, -0.35, 0.35);
+        rig.lEyeball.rotation.y = yaw;
+        rig.rEyeball.rotation.y = yaw;
+      }
+      // Talking: head bob + lip motion
       if (c.talking) {
         rig.head.rotation.x = Math.sin(t * 12) * 0.08;
         if (rig.lips) rig.lips.scale.y = 1 + Math.abs(Math.sin(t * 16)) * 4;
