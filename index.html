@@ -95,6 +95,7 @@
       <span class="key">鼠标</span> 视角<br>
       <span class="key">F</span> 手电筒 &nbsp;
       <span class="key">E</span> 互动（楼梯/电梯）&nbsp;
+      <span class="key">空格 / 左键</span> 挥刀<br>
       <span class="key">ESC</span> 释放鼠标
     </p>
     <p style="margin-top:14px; font-size:12px; color:#a89570;">
@@ -226,6 +227,7 @@ let levelGroup = null;
 let wallBoxes = [];
 let lights = [];
 let almonds = [];
+let knives = [];
 let entities = [];
 let stairExit = null;
 let elevator = null;
@@ -241,6 +243,8 @@ const player = {
   totalDist: 0,
   speedBoost: 0,
   almondsCollected: 0,
+  hasKnife: false,
+  knifeSwing: 0,
   lastPos: new THREE.Vector3(),
 };
 
@@ -249,58 +253,137 @@ const companions = [
   { name:'小李', color:0xffae6b, mesh:null, hp:1.0, alive:true, offset: new THREE.Vector3( 1.5, 0, 1.5) },
 ];
 
+function buildKnifeMesh() {
+  const g = new THREE.Group();
+  const blade = new THREE.Mesh(
+    new THREE.BoxGeometry(0.5, 0.04, 0.08),
+    new THREE.MeshLambertMaterial({ color: 0xdde6ee, emissive: 0x223344 })
+  );
+  blade.position.x = 0.18;
+  g.add(blade);
+  const tip = new THREE.Mesh(
+    new THREE.ConeGeometry(0.04, 0.12, 4),
+    new THREE.MeshLambertMaterial({ color: 0xdde6ee })
+  );
+  tip.rotation.z = -Math.PI / 2;
+  tip.position.x = 0.49;
+  g.add(tip);
+  const handle = new THREE.Mesh(
+    new THREE.BoxGeometry(0.18, 0.06, 0.07),
+    new THREE.MeshLambertMaterial({ color: 0x3a1f10 })
+  );
+  handle.position.x = -0.16;
+  g.add(handle);
+  const guard = new THREE.Mesh(
+    new THREE.BoxGeometry(0.04, 0.12, 0.10),
+    new THREE.MeshLambertMaterial({ color: 0x222222 })
+  );
+  guard.position.x = -0.06;
+  g.add(guard);
+  return g;
+}
+
+// Held knife (attached to camera; hidden until picked up)
+const heldKnifePivot = new THREE.Group();
+const heldKnife = buildKnifeMesh();
+heldKnifePivot.add(heldKnife);
+heldKnifePivot.position.set(0.35, -0.30, -0.55);
+heldKnifePivot.rotation.set(-0.2, -0.4, 0.3);
+heldKnifePivot.visible = false;
+camera.add(heldKnifePivot);
+
 function buildCompanionMesh(shirtColor, pantsColor = 0x2a2a3a) {
   const g = new THREE.Group();
-  const skin = new THREE.MeshLambertMaterial({ color: 0xf0d2b0 });
+  const skin  = new THREE.MeshLambertMaterial({ color: 0xf2d2a8 });
+  const skin2 = new THREE.MeshLambertMaterial({ color: 0xe8c39a }); // arms slightly darker
   const shirt = new THREE.MeshLambertMaterial({ color: shirtColor });
   const pants = new THREE.MeshLambertMaterial({ color: pantsColor });
-  const hair = new THREE.MeshLambertMaterial({ color: 0x1a1208 });
-  const shoe = new THREE.MeshLambertMaterial({ color: 0x111111 });
-  const eyeMat = new THREE.MeshBasicMaterial({ color: 0x111111 });
+  const hair  = new THREE.MeshLambertMaterial({ color: 0x1a1208 });
+  const shoe  = new THREE.MeshLambertMaterial({ color: 0x111111 });
+  const eyeWhite = new THREE.MeshBasicMaterial({ color: 0xffffff });
+  const pupil    = new THREE.MeshBasicMaterial({ color: 0x222220 });
+  const lipMat   = new THREE.MeshBasicMaterial({ color: 0x9a3a2a });
 
-  // Torso
-  const torso = new THREE.Mesh(new THREE.BoxGeometry(0.55, 0.75, 0.30), shirt);
-  torso.position.y = 1.20;
+  // Torso (capsule for round shoulders/chest)
+  const torso = new THREE.Mesh(
+    new THREE.CapsuleGeometry(0.24, 0.48, 6, 12), shirt
+  );
+  torso.position.y = 1.30;
   g.add(torso);
 
-  // Hips / pelvis
-  const hips = new THREE.Mesh(new THREE.BoxGeometry(0.50, 0.18, 0.28), pants);
-  hips.position.y = 0.78;
+  // Pelvis (cylinder, slightly tapered)
+  const hips = new THREE.Mesh(
+    new THREE.CylinderGeometry(0.22, 0.20, 0.20, 14), pants
+  );
+  hips.position.y = 0.86;
   g.add(hips);
 
   // Neck
-  const neck = new THREE.Mesh(new THREE.CylinderGeometry(0.07, 0.08, 0.10, 10), skin);
-  neck.position.y = 1.63;
+  const neck = new THREE.Mesh(
+    new THREE.CylinderGeometry(0.075, 0.085, 0.12, 12), skin
+  );
+  neck.position.y = 1.66;
   g.add(neck);
 
-  // Head + hair
-  const head = new THREE.Mesh(new THREE.BoxGeometry(0.30, 0.34, 0.28), skin);
-  head.position.y = 1.83;
+  // Head — slightly egg-shaped sphere
+  const head = new THREE.Group();
+  head.position.y = 1.78;
+  const skull = new THREE.Mesh(new THREE.SphereGeometry(0.18, 18, 16), skin);
+  skull.scale.set(0.95, 1.05, 0.92);
+  head.add(skull);
+  // Hair cap: hemisphere covering top/back
+  const hairCap = new THREE.Mesh(new THREE.SphereGeometry(0.185, 18, 16, 0, Math.PI*2, 0, Math.PI*0.55), hair);
+  hairCap.position.y = -0.005;
+  hairCap.scale.set(1.0, 1.05, 1.0);
+  head.add(hairCap);
+  // Ears
+  const earG = new THREE.SphereGeometry(0.04, 8, 8);
+  const lEar = new THREE.Mesh(earG, skin); lEar.scale.set(0.6, 1.0, 1.0);
+  const rEar = new THREE.Mesh(earG, skin); rEar.scale.set(0.6, 1.0, 1.0);
+  lEar.position.set(-0.18, 0, 0); rEar.position.set(0.18, 0, 0);
+  head.add(lEar); head.add(rEar);
+  // Eyes: white sclera + dark pupil group so pupil can rotate
+  const eyeWhiteG = new THREE.SphereGeometry(0.035, 12, 10);
+  const pupilG    = new THREE.SphereGeometry(0.018, 10, 8);
+  const lEyeball = new THREE.Group(); lEyeball.position.set(-0.062, 0.02, -0.155);
+  const rEyeball = new THREE.Group(); rEyeball.position.set( 0.062, 0.02, -0.155);
+  const lW = new THREE.Mesh(eyeWhiteG, eyeWhite); lEyeball.add(lW);
+  const rW = new THREE.Mesh(eyeWhiteG, eyeWhite); rEyeball.add(rW);
+  const lP = new THREE.Mesh(pupilG, pupil); lP.position.z = -0.025; lEyeball.add(lP);
+  const rP = new THREE.Mesh(pupilG, pupil); rP.position.z = -0.025; rEyeball.add(rP);
+  head.add(lEyeball); head.add(rEyeball);
+  // Eyebrows
+  const browG = new THREE.BoxGeometry(0.06, 0.012, 0.012);
+  const lBrow = new THREE.Mesh(browG, hair); lBrow.position.set(-0.062, 0.07, -0.165);
+  const rBrow = new THREE.Mesh(browG, hair); rBrow.position.set( 0.062, 0.07, -0.165);
+  head.add(lBrow); head.add(rBrow);
+  // Nose: tiny sloped pyramid
+  const nose = new THREE.Mesh(new THREE.ConeGeometry(0.025, 0.07, 4), skin);
+  nose.rotation.x = Math.PI/2;
+  nose.position.set(0, -0.005, -0.18);
+  head.add(nose);
+  // Mouth: thin lip plate that scales while talking
+  const mouth = new THREE.Mesh(new THREE.BoxGeometry(0.08, 0.012, 0.01), lipMat);
+  mouth.position.set(0, -0.07, -0.175);
+  head.add(mouth);
   g.add(head);
-  const hairTop = new THREE.Mesh(new THREE.BoxGeometry(0.32, 0.10, 0.30), hair);
-  hairTop.position.y = 2.01;
-  g.add(hairTop);
 
-  // Eyes
-  const eyeG = new THREE.SphereGeometry(0.025, 6, 6);
-  const lEye = new THREE.Mesh(eyeG, eyeMat);
-  const rEye = new THREE.Mesh(eyeG, eyeMat);
-  lEye.position.set(-0.07, 1.86, -0.145);
-  rEye.position.set( 0.07, 1.86, -0.145);
-  g.add(lEye); g.add(rEye);
-
-  // Arms (shoulder + forearm) — pivots so we can swing them
+  // Arms — capsule upper + capsule forearm + sphere hand
   function makeArm(side) {
     const arm = new THREE.Group();
-    arm.position.set(side * 0.33, 1.55, 0); // shoulder pivot
-    const upper = new THREE.Mesh(new THREE.BoxGeometry(0.14, 0.40, 0.14), shirt);
+    arm.position.set(side * 0.30, 1.54, 0);
+    const upper = new THREE.Mesh(new THREE.CapsuleGeometry(0.075, 0.30, 4, 10), shirt);
     upper.position.y = -0.20;
     arm.add(upper);
     const elbow = new THREE.Group();
     elbow.position.y = -0.40;
-    const fore = new THREE.Mesh(new THREE.BoxGeometry(0.13, 0.38, 0.13), skin);
+    const fore = new THREE.Mesh(new THREE.CapsuleGeometry(0.065, 0.28, 4, 10), skin2);
     fore.position.y = -0.19;
     elbow.add(fore);
+    const hand = new THREE.Mesh(new THREE.SphereGeometry(0.08, 10, 8), skin2);
+    hand.position.y = -0.40;
+    hand.scale.set(0.9, 0.7, 1.0);
+    elbow.add(hand);
     arm.add(elbow);
     g.add(arm);
     return arm;
@@ -308,20 +391,20 @@ function buildCompanionMesh(shirtColor, pantsColor = 0x2a2a3a) {
   const leftArm  = makeArm(-1);
   const rightArm = makeArm( 1);
 
-  // Legs
+  // Legs — capsule upper + capsule lower + box foot
   function makeLeg(side) {
     const leg = new THREE.Group();
-    leg.position.set(side * 0.13, 0.70, 0); // hip pivot
-    const upper = new THREE.Mesh(new THREE.BoxGeometry(0.18, 0.42, 0.18), pants);
-    upper.position.y = -0.21;
+    leg.position.set(side * 0.13, 0.78, 0);
+    const upper = new THREE.Mesh(new THREE.CapsuleGeometry(0.10, 0.34, 4, 10), pants);
+    upper.position.y = -0.22;
     leg.add(upper);
     const knee = new THREE.Group();
-    knee.position.y = -0.42;
-    const lower = new THREE.Mesh(new THREE.BoxGeometry(0.17, 0.38, 0.17), pants);
-    lower.position.y = -0.19;
+    knee.position.y = -0.44;
+    const lower = new THREE.Mesh(new THREE.CapsuleGeometry(0.085, 0.32, 4, 10), pants);
+    lower.position.y = -0.20;
     knee.add(lower);
-    const foot = new THREE.Mesh(new THREE.BoxGeometry(0.20, 0.08, 0.30), shoe);
-    foot.position.set(0, -0.40, 0.04);
+    const foot = new THREE.Mesh(new THREE.BoxGeometry(0.18, 0.07, 0.30), shoe);
+    foot.position.set(0, -0.42, 0.05);
     knee.add(foot);
     leg.add(knee);
     g.add(leg);
@@ -330,7 +413,10 @@ function buildCompanionMesh(shirtColor, pantsColor = 0x2a2a3a) {
   const leftLeg  = makeLeg(-1);
   const rightLeg = makeLeg( 1);
 
-  g.userData.rig = { leftArm, rightArm, leftLeg, rightLeg, head };
+  g.userData.rig = {
+    leftArm, rightArm, leftLeg, rightLeg, head,
+    mouth, lEyeball, rEyeball, torso,
+  };
   return g;
 }
 
@@ -374,10 +460,10 @@ function disposeLevel() {
     }
   });
   levelGroup = null;
-  wallBoxes = []; lights = []; almonds = []; entities = []; stairExit = null; elevator = null;
+  wallBoxes = []; lights = []; almonds = []; knives = []; entities = []; stairExit = null; elevator = null;
 }
 
-function buildLevel(n) {
+function buildLevel(n, opts = {}) {
   disposeLevel();
   const cfg = LEVELS[n];
   currentLevel = n;
@@ -470,6 +556,8 @@ function buildLevel(n) {
   }
   controls.getObject().position.set(spawnX, 1.7, spawnZ);
   player.lastPos.copy(controls.getObject().position);
+  // (will override below if arriving by elevator)
+  scene.userData.spawnedAtElevator = false;
 
   for (const c of companions) {
     if (!c.alive) continue;
@@ -501,6 +589,25 @@ function buildLevel(n) {
     glow.position.set(wx, 0.5, wz);
     levelGroup.add(glow);
     almonds.push({ mesh: g, glow, alive:true, baseY:0.18, seed: Math.random()*Math.PI*2 });
+  }
+
+  // Knife pickups (rare)
+  if (!player.hasKnife) {
+    const knifeCount = 1 + (Math.random() < 0.3 ? 1 : 0);
+    for (let i = 0; i < knifeCount && candidate.length; i++) {
+      const k = Math.floor(Math.random() * candidate.length);
+      const [cx, cz] = candidate.splice(k, 1)[0];
+      const wx = (cx - GRID/2)*CELL + (Math.random()-0.5)*1.2;
+      const wz = (cz - GRID/2)*CELL + (Math.random()-0.5)*1.2;
+      const g = buildKnifeMesh();
+      g.position.set(wx, 0.25, wz);
+      g.rotation.z = Math.PI / 2;
+      levelGroup.add(g);
+      const glow = new THREE.PointLight(0xc0e8ff, 0.5, 2.2, 2);
+      glow.position.set(wx, 0.5, wz);
+      levelGroup.add(glow);
+      knives.push({ mesh: g, glow, alive:true, baseY:0.25, seed: Math.random()*Math.PI*2 });
+    }
   }
 
   // Stair exit at far corner
@@ -551,22 +658,48 @@ function buildLevel(n) {
     stairExit = { mesh: stair, pos: new THREE.Vector3(wx, 0, wz), pillar, isFinal };
   }
 
-  // ---------- Elevator (warp to any floor) ----------
-  // Find an open cell near the spawn that's not the spawn itself
-  let elevCell = null, elevBest = Infinity;
+  // ---------- Elevator (corner placement, animated entry) ----------
+  function isCornerCell(cx, cz) {
+    let walls = 0;
+    for (const [dx, dz] of [[1,0],[-1,0],[0,1],[0,-1]]) {
+      const nx = cx+dx, nz = cz+dz;
+      if (nx<0||nz<0||nx>=GRID||nz>=GRID || cells[nx][nz].wall) walls++;
+    }
+    return walls >= 2;
+  }
+  function openNeighborDir(cx, cz) {
+    for (const [dx, dz] of [[1,0],[-1,0],[0,1],[0,-1]]) {
+      const nx = cx+dx, nz = cz+dz;
+      if (nx>=0 && nz>=0 && nx<GRID && nz<GRID && !cells[nx][nz].wall) return [dx, dz];
+    }
+    return [0, 1];
+  }
+  let elevCell = null, elevBest = -Infinity;
   for (const [cx, cz] of openCells) {
+    if (!isCornerCell(cx, cz)) continue;
     const wx = (cx - GRID/2)*CELL, wz = (cz - GRID/2)*CELL;
     const dSpawn = (wx-spawnX)*(wx-spawnX) + (wz-spawnZ)*(wz-spawnZ);
-    if (dSpawn < 1.0) continue;
+    if (dSpawn < 16) continue;
     if (stairExit) {
       const sx = wx - stairExit.pos.x, sz = wz - stairExit.pos.z;
-      if (sx*sx + sz*sz < 16) continue;
+      if (sx*sx + sz*sz < 36) continue;
     }
-    if (dSpawn < elevBest && dSpawn > 4) { elevBest = dSpawn; elevCell = [cx, cz]; }
+    if (dSpawn > elevBest) { elevBest = dSpawn; elevCell = [cx, cz]; }
+  }
+  // Fallback: any corner cell
+  if (!elevCell) {
+    for (const [cx, cz] of openCells) {
+      if (isCornerCell(cx, cz)) { elevCell = [cx, cz]; break; }
+    }
   }
   if (elevCell) {
     const [ex, ez] = elevCell;
     const wx = (ex - GRID/2)*CELL, wz = (ez - GRID/2)*CELL;
+    const [odx, odz] = openNeighborDir(ex, ez);
+    // Push the cabin against the wall opposite the open neighbor
+    const insetX = wx - odx * (CELL/2 - 0.55);
+    const insetZ = wz - odz * (CELL/2 - 0.55);
+
     const elev = new THREE.Group();
     const cabinMat = new THREE.MeshLambertMaterial({ color: 0x806030 });
     const cabin = new THREE.Mesh(new THREE.BoxGeometry(1.6, 2.4, 1.0), cabinMat);
@@ -578,14 +711,17 @@ function buildLevel(n) {
     );
     back.position.set(0, 1.1, -0.45);
     elev.add(back);
-    // Door split
+
+    // Two sliding doors — store base x for animation
     const doorMat = new THREE.MeshLambertMaterial({ color: 0xc0a060 });
     const dL = new THREE.Mesh(new THREE.BoxGeometry(0.74, 2.1, 0.04), doorMat);
     const dR = new THREE.Mesh(new THREE.BoxGeometry(0.74, 2.1, 0.04), doorMat);
-    dL.position.set(-0.38, 1.05, 0.51);
-    dR.position.set( 0.38, 1.05, 0.51);
+    const dLBaseX = -0.38, dRBaseX = 0.38;
+    dL.position.set(dLBaseX, 1.05, 0.51);
+    dR.position.set(dRBaseX, 1.05, 0.51);
     elev.add(dL); elev.add(dR);
-    // Call button
+
+    // Call button + light
     const btn = new THREE.Mesh(
       new THREE.SphereGeometry(0.06, 8, 8),
       new THREE.MeshBasicMaterial({ color: 0x66ddff })
@@ -595,10 +731,19 @@ function buildLevel(n) {
     const elevLight = new THREE.PointLight(0x66ddff, 0.9, 4, 2);
     elevLight.position.set(0, 2.2, 0.4);
     elev.add(elevLight);
-    elev.rotation.y = Math.atan2(-wx, -wz);
-    elev.position.set(wx, 0, wz);
+
+    // Orient: door (+z local) faces the open neighbor direction
+    elev.rotation.y = Math.atan2(odx, odz);
+    elev.position.set(insetX, 0, insetZ);
     levelGroup.add(elev);
-    elevator = { mesh: elev, pos: new THREE.Vector3(wx, 0, wz), btn };
+
+    elevator = {
+      mesh: elev,
+      pos: new THREE.Vector3(insetX, 0, insetZ),
+      doorOut: new THREE.Vector3(odx, 0, odz),
+      btn, dL, dR, dLBaseX, dRBaseX,
+      doorOpen: 1,    // 1 = open, 0 = closed
+    };
   }
 
   spawnProps(cfg, openCells);
@@ -620,7 +765,27 @@ function buildLevel(n) {
     const ec = openCells[Math.floor(Math.random()*openCells.length)];
     eg.position.set((ec[0]-GRID/2)*CELL, 0, (ec[1]-GRID/2)*CELL);
     levelGroup.add(eg);
-    entities.push({ mesh: eg, speed: 1.4 + n*0.18 });
+    entities.push({ mesh: eg, speed: 1.4 + n*0.18, hp: 1.0 });
+  }
+
+  // If we arrived by elevator, spawn the player just outside its doors,
+  // facing into the room. Companions follow nearby.
+  if (opts.spawnAtElevator && elevator) {
+    const out = elevator.doorOut;
+    const px = elevator.pos.x + out.x * 1.0;
+    const pz = elevator.pos.z + out.z * 1.0;
+    controls.getObject().position.set(px, 1.7, pz);
+    player.lastPos.set(px, 1.7, pz);
+    // Look outward
+    if ('lookAt' in camera) {
+      camera.lookAt(elevator.pos.x + out.x * 4, 1.7, elevator.pos.z + out.z * 4);
+    }
+    for (const c of companions) {
+      if (!c.alive || !c.mesh) continue;
+      c.mesh.position.set(px - out.x * 0.6, 0, pz - out.z * 0.6);
+    }
+    elevator.doorOpen = 0; // start with doors closed; will animate open
+    scene.userData.spawnedAtElevator = true;
   }
 
   showFloorTitle(n + 1, cfg.name);
@@ -969,12 +1134,35 @@ function closeElevator() {
   elevatorPanel.style.display = 'none';
   controls.lock();
 }
+// Elevator transition state machine.
+// Phases: closing → fadeout → rebuild → opening
+let elevatorTransition = null;
+
 function gotoFloor(i) {
   if (i < 0 || i >= LEVELS.length) return;
+  if (!elevatorTransition) {
+    closeElevator();
+    if (i === currentLevel) return;
+    if (!elevator) { buildLevel(i, { spawnAtElevator: true }); return; }
+    elevatorTransition = { phase: 'closing', t: 0, target: i };
+    controls.unlock();
+    blip(440, 0.3, 0.18);
+    say(`电梯前往：${LEVELS[i].name}`, 2);
+    return;
+  }
+  // Already in 'pulling' phase, picked floor → continue from closing
+  if (i === currentLevel) {
+    elevatorTransition = null;
+    controls.lock();
+    closeElevator();
+    return;
+  }
   closeElevator();
-  blip(880, 0.2, 0.18); setTimeout(()=>blip(440, 0.4, 0.15), 120);
+  elevatorTransition.phase = 'closing';
+  elevatorTransition.t = 0;
+  elevatorTransition.target = i;
+  blip(440, 0.3, 0.18);
   say(`电梯前往：${LEVELS[i].name}`, 2);
-  setTimeout(() => buildLevel(i), 500);
 }
 floorListEl.addEventListener('click', e => {
   const t = e.target.closest('button');
@@ -993,14 +1181,61 @@ addEventListener('keydown', e => {
   keys[e.code] = true;
   if (e.code === 'KeyF') player.flashlightOn = !player.flashlightOn;
   if (e.code === 'KeyE') tryInteract();
+  if (e.code === 'Space') { e.preventDefault(); trySwingKnife(); }
 });
 addEventListener('keyup', e => keys[e.code] = false);
+addEventListener('mousedown', e => {
+  if (e.button === 0 && controls.isLocked) trySwingKnife();
+});
+
+function trySwingKnife() {
+  if (!player.hasKnife || player.knifeSwing > 0) return;
+  player.knifeSwing = 0.35;
+  blip(420, 0.08, 0.12);
+  // Damage entities within reach in front of camera
+  const reach = 2.2;
+  const camDir = new THREE.Vector3();
+  camera.getWorldDirection(camDir); camDir.y = 0; camDir.normalize();
+  const pp = controls.getObject().position;
+  for (const e of entities) {
+    if (!e.mesh) continue;
+    const v = new THREE.Vector3().subVectors(e.mesh.position, pp);
+    const d = v.length();
+    if (d > reach) continue;
+    v.y = 0; v.normalize();
+    if (v.dot(camDir) < 0.4) continue;
+    e.hp = (e.hp ?? 1.0) - 0.5;
+    e.mesh.position.addScaledVector(camDir, 0.4);
+    flashEl.style.opacity = '0.25';
+    setTimeout(() => flashEl.style.opacity = '0', 80);
+    if (e.hp <= 0) {
+      levelGroup.remove(e.mesh);
+      e.mesh = null;
+      say('它退散了……', 2);
+      playStatic();
+    }
+  }
+  entities = entities.filter(e => e.mesh);
+}
 
 function tryInteract() {
+  if (elevatorTransition) return;
   const p = controls.getObject().position;
   if (elevator) {
     const dx = p.x - elevator.pos.x, dz = p.z - elevator.pos.z;
-    if (dx*dx + dz*dz < 1.8*1.8) { openElevator(); return; }
+    if (dx*dx + dz*dz < 2.0*2.0) {
+      // Step into cabin, then show floor panel
+      elevatorTransition = { phase: 'pulling', t: 0, target: null };
+      controls.unlock();
+      blip(880, 0.18, 0.18);
+      setTimeout(() => {
+        // After 0.7s "pull in", show the panel; gotoFloor will continue the transition
+        if (elevatorTransition && elevatorTransition.target == null) {
+          openElevator();
+        }
+      }, 700);
+      return;
+    }
   }
   if (stairExit) {
     const dx = p.x - stairExit.pos.x, dz = p.z - stairExit.pos.z;
@@ -1048,6 +1283,8 @@ function resetAll() {
   player.hp = 1; player.sanity = 1; player.stamina = 1;
   player.flashlightBattery = 1; player.flashlightOn = false;
   player.totalDist = 0; player.speedBoost = 0; player.almondsCollected = 0;
+  player.hasKnife = false; player.knifeSwing = 0;
+  heldKnifePivot.visible = false;
   for (const c of companions) { c.hp = 1; c.alive = true; }
   buildLevel(0);
 }
@@ -1136,6 +1373,36 @@ function tick() {
     }
   }
 
+  // Knife pickups
+  for (const k of knives) {
+    if (!k.alive) continue;
+    k.mesh.rotation.y += dt * 2;
+    k.mesh.position.y = k.baseY + Math.sin(t * 2.5 + k.seed) * 0.08;
+    const dx = k.mesh.position.x - controls.getObject().position.x;
+    const dz = k.mesh.position.z - controls.getObject().position.z;
+    if (dx*dx + dz*dz < 0.7*0.7) {
+      k.alive = false;
+      levelGroup.remove(k.mesh); levelGroup.remove(k.glow);
+      player.hasKnife = true;
+      heldKnifePivot.visible = true;
+      say('拾起刀。空格 / 左键 挥砍', 3);
+      blip(660, 0.15, 0.18); setTimeout(()=>blip(990, 0.18, 0.15), 60);
+    }
+  }
+
+  // Knife swing animation
+  if (player.knifeSwing > 0) {
+    player.knifeSwing = Math.max(0, player.knifeSwing - dt);
+    const phase = 1 - player.knifeSwing / 0.35;
+    const swing = Math.sin(phase * Math.PI);
+    heldKnifePivot.rotation.x = -0.2 - swing * 1.4;
+    heldKnifePivot.rotation.z =  0.3 - swing * 0.6;
+  } else if (player.hasKnife) {
+    // Idle bob
+    heldKnifePivot.rotation.x = -0.2 + Math.sin(t * 1.6) * 0.03;
+    heldKnifePivot.rotation.z =  0.3 + Math.sin(t * 1.2) * 0.02;
+  }
+
   flashlight.intensity = (player.flashlightOn && player.flashlightBattery > 0) ? 40 : 0;
   if (player.flashlightOn) {
     player.flashlightBattery = Math.max(0, player.flashlightBattery - dt*0.02);
@@ -1169,11 +1436,38 @@ function tick() {
       rig.rightLeg.rotation.x = -sw;
       rig.leftArm.rotation.x  = -sw * 0.8;
       rig.rightArm.rotation.x =  sw * 0.8;
-      // Talking: bob the head
+
+      // Breathing — torso scales subtly
+      if (rig.torso) {
+        const br = 1 + Math.sin(t * 1.6 + (c.walkPhase || 0)*0.1) * 0.03;
+        rig.torso.scale.set(br, 1, br);
+      }
+
+      // Eye-tracking: pupils glance toward player
+      if (rig.lEyeball && rig.rEyeball) {
+        const headWP = new THREE.Vector3();
+        rig.head.getWorldPosition(headWP);
+        const local = c.mesh.worldToLocal(pp.clone());
+        const dx = local.x, dz = local.z - rig.head.position.z;
+        const yaw = THREE.MathUtils.clamp(Math.atan2(dx, -dz) * 0.5, -0.4, 0.4);
+        rig.lEyeball.rotation.y = yaw;
+        rig.rEyeball.rotation.y = yaw;
+      }
+
+      // Talking: head bob + mouth open/close
       if (c.talking) {
-        rig.head.rotation.x = Math.sin(t * 14) * 0.08;
+        rig.head.rotation.x = Math.sin(t * 14) * 0.06;
+        if (rig.mouth) {
+          const open = 0.5 + Math.abs(Math.sin(t * 18)) * 0.5;
+          rig.mouth.scale.y = 1 + open * 6;
+          rig.mouth.scale.x = 1 + open * 0.4;
+        }
       } else {
         rig.head.rotation.x *= 0.9;
+        if (rig.mouth) {
+          rig.mouth.scale.y += (1 - rig.mouth.scale.y) * 0.3;
+          rig.mouth.scale.x += (1 - rig.mouth.scale.x) * 0.3;
+        }
       }
     }
     prev = c.mesh.position;
@@ -1282,6 +1576,7 @@ function tick() {
   document.getElementById('hpFill').style.width      = (Math.max(0,player.hp)*100)+'%';
   document.getElementById('distance').textContent =
     '行程：' + Math.floor(player.totalDist) + ' 米　杏仁水：' + player.almondsCollected +
+    (player.hasKnife ? '　🗡' : '') +
     (player.speedBoost > 0 ? '　加速 ' + player.speedBoost.toFixed(1) + 's' : '');
 
   const teamEl = document.getElementById('team');
@@ -1301,10 +1596,60 @@ function tick() {
   }
   if (elevator) {
     const dx = pp.x - elevator.pos.x, dz = pp.z - elevator.pos.z;
-    if (dx*dx + dz*dz < 1.8*1.8) {
+    if (!elevatorTransition && dx*dx + dz*dz < 2.0*2.0) {
       if (subTimer <= 0) say('按 E 进入电梯', 0.4);
     }
     if (elevator.btn) elevator.btn.material.color.setHSL(0.55, 0.8, 0.45 + Math.sin(t*4)*0.2);
+    // Animate doors based on doorOpen state (0 closed → 1 open)
+    const o = elevator.doorOpen;
+    elevator.dL.position.x = elevator.dLBaseX - (1 - o) * elevator.dLBaseX;
+    elevator.dR.position.x = elevator.dRBaseX - (1 - o) * elevator.dRBaseX;
+  }
+
+  // Elevator transition state machine
+  if (elevatorTransition) {
+    const T = elevatorTransition;
+    T.t += dt;
+    if (T.phase === 'pulling') {
+      // Pull player into cabin
+      const targetX = elevator.pos.x;
+      const targetZ = elevator.pos.z;
+      const obj = controls.getObject();
+      const a = Math.min(T.t / 0.6, 1);
+      obj.position.x += (targetX - obj.position.x) * a * 0.4;
+      obj.position.z += (targetZ - obj.position.z) * a * 0.4;
+      obj.position.y = 1.7;
+      if (T.t > 0.6) { T.phase = 'closing'; T.t = 0; blip(440, 0.3, 0.18); }
+    } else if (T.phase === 'closing') {
+      const a = Math.min(T.t / 0.7, 1);
+      if (elevator) elevator.doorOpen = 1 - a;
+      if (T.t > 0.8) { T.phase = 'fadeout'; T.t = 0; }
+    } else if (T.phase === 'fadeout') {
+      flashEl.style.opacity = String(Math.min(T.t / 0.6, 1));
+      // Subtle motion sound
+      if (T.t > 0.6) {
+        T.phase = 'rebuild'; T.t = 0;
+        // Open elevator doors are now closed; show motion blip
+        say(`电梯运行中…… → ${LEVELS[T.target].name}`, 1.5);
+      }
+    } else if (T.phase === 'rebuild') {
+      // Wait briefly inside the dark, then build new level
+      if (T.t > 1.0) {
+        buildLevel(T.target, { spawnAtElevator: true });
+        T.phase = 'fadein'; T.t = 0;
+      }
+    } else if (T.phase === 'fadein') {
+      flashEl.style.opacity = String(Math.max(0, 1 - T.t / 0.5));
+      if (T.t > 0.5) { T.phase = 'opening'; T.t = 0; blip(660, 0.3, 0.18); }
+    } else if (T.phase === 'opening') {
+      const a = Math.min(T.t / 0.9, 1);
+      if (elevator) elevator.doorOpen = a;
+      if (T.t > 1.0) {
+        flashEl.style.opacity = '0';
+        elevatorTransition = null;
+        controls.lock();
+      }
+    }
   }
 
   scene.fog.far = LEVELS[currentLevel].fogFar - (1 - player.sanity) * 10;
