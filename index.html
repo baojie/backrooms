@@ -1,10 +1,11 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="zh">
 <head>
 <meta charset="UTF-8">
 <title>后室 / The Backrooms</title>
 <style>
-  html, body { margin: 0; padding: 0; overflow: hidden; background: #000; font-family: 'Microsoft YaHei', 'PingFang SC', 'Noto Sans CJK SC', sans-serif; color: #d4c87a; }
+  html, body { margin: 0; padding: 0; overflow: hidden; background: #000;
+    font-family: 'Microsoft YaHei', 'PingFang SC', 'Noto Sans CJK SC', sans-serif; color: #d4c87a; }
   #hud {
     position: fixed; top: 12px; left: 12px; pointer-events: none;
     font-size: 14px; text-shadow: 0 0 4px #000, 0 0 8px #000;
@@ -13,72 +14,116 @@
   #hud .bar { width: 180px; height: 8px; background: rgba(0,0,0,0.5); border: 1px solid #5a4f1f; margin-top: 2px; }
   #hud .fill { height: 100%; background: #d4c87a; transition: width .2s; }
   #hud .fill.sanity { background: #b86b6b; }
+  #hud .fill.hp { background: #d46b6b; }
+  #floorTag { position: fixed; top: 12px; right: 16px; font-size: 16px;
+    text-shadow: 0 0 4px #000, 0 0 8px #000; color: #e8d97a; pointer-events: none; }
+  #team { position: fixed; bottom: 12px; left: 12px; font-size: 13px;
+    text-shadow: 0 0 4px #000; pointer-events: none; line-height: 1.4; }
+  #team .member { margin-bottom: 4px; }
+  #team .name { display: inline-block; min-width: 56px; }
+  #team .bar { display: inline-block; width: 80px; height: 6px; background: rgba(0,0,0,0.5); border:1px solid #444; vertical-align: middle; }
+  #team .bar .fill { height: 100%; background: #6bd47a; }
   #overlay {
     position: fixed; inset: 0; display: flex; align-items: center; justify-content: center;
-    background: rgba(0,0,0,0.85); color: #d4c87a; text-align: center;
+    background: rgba(0,0,0,0.88); color: #d4c87a; text-align: center;
     cursor: pointer; z-index: 10;
   }
-  #overlay .panel { max-width: 540px; padding: 24px; }
+  #overlay .panel { max-width: 580px; padding: 24px; }
   #overlay h1 { font-size: 38px; letter-spacing: 6px; margin: 0 0 12px; color: #e8d97a; }
-  #overlay p { line-height: 1.6; font-size: 14px; }
+  #overlay p { line-height: 1.7; font-size: 14px; }
   #overlay .key { color: #fff; background: #2a2410; padding: 2px 6px; border: 1px solid #5a4f1f; }
-  #vignette {
-    position: fixed; inset: 0; pointer-events: none; z-index: 5;
-    box-shadow: inset 0 0 220px 80px rgba(0,0,0,0.85);
-  }
-  #flash {
-    position: fixed; inset: 0; pointer-events: none; z-index: 6;
-    background: #000; opacity: 0; transition: opacity 60ms;
-  }
-  #subtitle {
-    position: fixed; bottom: 40px; left: 0; right: 0; text-align: center;
-    font-size: 16px; color: #b8a050; text-shadow: 0 0 6px #000;
-    pointer-events: none; opacity: 0; transition: opacity .4s;
-  }
-  #deathScreen {
-    position: fixed; inset: 0; display: none; align-items: center; justify-content: center;
-    background: rgba(20,0,0,0.92); color: #c44; text-align: center; z-index: 20;
-    cursor: pointer;
-  }
+  #vignette { position: fixed; inset: 0; pointer-events: none; z-index: 5;
+    box-shadow: inset 0 0 220px 80px rgba(0,0,0,0.85); }
+  #flash { position: fixed; inset: 0; pointer-events: none; z-index: 6;
+    background: #000; opacity: 0; transition: opacity 60ms; }
+  #subtitle { position: fixed; bottom: 80px; left: 0; right: 0; text-align: center;
+    font-size: 16px; color: #d4c87a; text-shadow: 0 0 6px #000;
+    pointer-events: none; opacity: 0; transition: opacity .4s; }
+  #floorTitle { position: fixed; inset: 0; display: flex; align-items: center; justify-content: center;
+    color: #fff; font-size: 36px; letter-spacing: 8px; pointer-events: none; opacity: 0;
+    transition: opacity 1.2s; z-index: 7; text-shadow: 0 0 12px #000; }
+  #deathScreen { position: fixed; inset: 0; display: none; align-items: center; justify-content: center;
+    background: rgba(20,0,0,0.92); color: #c44; text-align: center; z-index: 20; cursor: pointer; }
   #deathScreen h1 { font-size: 52px; letter-spacing: 8px; }
   #deathScreen p { color: #888; }
+  #winScreen { position: fixed; inset: 0; display: none; align-items: center; justify-content: center;
+    background: rgba(0,0,0,0.95); color: #f3e9a0; text-align: center; z-index: 20; cursor: pointer; }
+  #winScreen h1 { font-size: 48px; letter-spacing: 6px; }
+  #elevatorPanel { position: fixed; inset: 0; display: none; align-items: center; justify-content: center;
+    background: rgba(0,0,0,0.78); z-index: 15; }
+  #elevatorPanel .box { background: #161616; border: 2px solid #555; border-radius: 6px;
+    padding: 22px 26px; color: #d4c87a; min-width: 320px; box-shadow: 0 0 24px #000; }
+  #elevatorPanel h2 { margin: 0 0 14px; font-size: 22px; letter-spacing: 4px; color: #f3e9a0; text-align:center; }
+  #elevatorPanel .floors { display: grid; grid-template-columns: repeat(2, 1fr); gap: 6px; }
+  #elevatorPanel button { background: #2a2a2a; color: #e8d97a; border: 1px solid #555;
+    padding: 8px 10px; font-size: 14px; cursor: pointer; text-align: left;
+    font-family: inherit; transition: background .15s; }
+  #elevatorPanel button:hover { background: #4a3a1a; color: #fff; }
+  #elevatorPanel button.cur { background: #553311; color: #fff; }
+  #elevatorPanel .hint { margin-top: 12px; font-size: 11px; color: #888; text-align:center; }
 </style>
 </head>
 <body>
 
 <div id="hud">
-  <div>体力</div>
+  <div>体力 (Stamina)</div>
   <div class="bar"><div class="fill" id="staminaFill" style="width:100%"></div></div>
-  <div style="margin-top:6px">理智</div>
+  <div style="margin-top:6px">理智 (Sanity)</div>
   <div class="bar"><div class="fill sanity" id="sanityFill" style="width:100%"></div></div>
+  <div style="margin-top:6px">生命 (HP)</div>
+  <div class="bar"><div class="fill hp" id="hpFill" style="width:100%"></div></div>
   <div style="margin-top:8px" id="distance">行程：0 米</div>
 </div>
+
+<div id="floorTag">Level 1</div>
+<div id="team"></div>
 
 <div id="vignette"></div>
 <div id="flash"></div>
 <div id="subtitle"></div>
+<div id="floorTitle"></div>
 
 <div id="overlay">
   <div class="panel">
     <h1>后室</h1>
-    <p>你穿模出了现实。<br>
-    无尽的黄色房间，潮湿的地毯，日光灯的嗡鸣。<br>
-    这里还有别的东西。</p>
-    <p style="margin-top:24px">
+    <p>你穿模出了现实，跌入永无止境的迷宫。<br>
+    十层地狱，每层都不一样。<br>
+    你和两位同伴 <b>小王</b>、<b>小李</b> 必须找到下楼梯，活着抵达终焉。</p>
+    <p style="margin-top:18px">
       <span class="key">W A S D</span> 移动 &nbsp;
       <span class="key">SHIFT</span> 奔跑 &nbsp;
       <span class="key">鼠标</span> 视角<br>
       <span class="key">F</span> 手电筒 &nbsp;
+      <span class="key">E</span> 互动（楼梯/电梯）&nbsp;
       <span class="key">ESC</span> 释放鼠标
     </p>
-    <p style="margin-top:24px; color:#fff">按 <span class="key">ENTER</span> 进入</p>
+    <p style="margin-top:14px; font-size:12px; color:#a89570;">
+      捡起 <b style="color:#f6e29a">杏仁水</b> 恢复理智并加速。靠近楼梯按 E 进入下一层，或乘 <b style="color:#9ed8ff">电梯</b> 直达任意层。
+    </p>
+    <p style="margin-top:20px; color:#fff">点击进入</p>
   </div>
 </div>
 
 <div id="deathScreen">
   <div>
     <h1>被发现了</h1>
-    <p>按 ENTER 重新穿模。</p>
+    <p>点击重新穿模。</p>
+  </div>
+</div>
+
+<div id="winScreen">
+  <div>
+    <h1>你逃出来了</h1>
+    <p style="color:#aaa">穿过十层后室，你重见光明。</p>
+    <p style="color:#fff; margin-top:24px">点击重新开始</p>
+  </div>
+</div>
+
+<div id="elevatorPanel">
+  <div class="box">
+    <h2>电梯 / Elevator</h2>
+    <div class="floors" id="floorList"></div>
+    <div class="hint">数字键 1-9, 0=10　|　ESC 关闭</div>
   </div>
 </div>
 
@@ -95,17 +140,42 @@
 import * as THREE from 'three';
 import { PointerLockControls } from 'three/addons/controls/PointerLockControls.js';
 
-// ---------- Setup ----------
-const scene = new THREE.Scene();
-scene.background = new THREE.Color(0x111007);
-scene.fog = new THREE.Fog(0x1a1505, 4, 28);
+// ============================================================
+// Floor / Level definitions
+// ============================================================
+const LEVELS = [
+  { name:'黄色房间',   wallRGB:[212,187,96],  floorRGB:[110,70,35],  ceilRGB:[180,170,140],
+    ambient:0x665533, lightHex:0xfff0b8, fogHex:0x1a1505, fogNear:4,  fogFar:28, hasCeiling:true },
+  { name:'车库',       wallRGB:[120,120,124], floorRGB:[70,70,72],   ceilRGB:[90,90,92],
+    ambient:0x484850, lightHex:0xc4c8b0, fogHex:0x202024, fogNear:3,  fogFar:24, hasCeiling:true, props:'cars' },
+  { name:'发电厂',     wallRGB:[80,80,86],    floorRGB:[60,55,50],   ceilRGB:[55,55,60],
+    ambient:0x303040, lightHex:0xb0d8ff, fogHex:0x10141c, fogNear:2,  fogFar:22, hasCeiling:true, props:'sparks' },
+  { name:'游泳池',     wallRGB:[200,220,235], floorRGB:[100,180,220], ceilRGB:[230,235,245],
+    ambient:0x6088a0, lightHex:0xeaffff, fogHex:0xa6d8e8, fogNear:6,  fogFar:32, hasCeiling:true, props:'water' },
+  { name:'农场',       wallRGB:[140,108,70],  floorRGB:[80,140,60],   ceilRGB:[120,170,220],
+    ambient:0x88aacc, lightHex:0xffeec4, fogHex:0xb6cde0, fogNear:8,  fogFar:40, hasCeiling:false, props:'crops' },
+  { name:'幼儿园',     wallRGB:[245,200,205], floorRGB:[200,160,180], ceilRGB:[255,240,220],
+    ambient:0xa07880, lightHex:0xffd0d0, fogHex:0x402030, fogNear:3,  fogFar:20, hasCeiling:true, props:'toys' },
+  { name:'办公室',     wallRGB:[210,200,180], floorRGB:[80,90,100],   ceilRGB:[230,230,225],
+    ambient:0x707070, lightHex:0xffffff, fogHex:0x303030, fogNear:4,  fogFar:26, hasCeiling:true, props:'cubicles' },
+  { name:'图书馆',     wallRGB:[120,80,40],   floorRGB:[60,40,25],    ceilRGB:[80,55,35],
+    ambient:0x3a2a18, lightHex:0xffd080, fogHex:0x1c1208, fogNear:3,  fogFar:22, hasCeiling:true, props:'shelves' },
+  { name:'地铁站',     wallRGB:[90,90,95],    floorRGB:[40,40,45],    ceilRGB:[60,60,65],
+    ambient:0x303038, lightHex:0xffe080, fogHex:0x101014, fogNear:2,  fogFar:18, hasCeiling:true, props:'rails' },
+  { name:'终焉',       wallRGB:[10,10,10],    floorRGB:[10,10,12],    ceilRGB:[10,10,10],
+    ambient:0x000000, lightHex:0xffffff, fogHex:0x000000, fogNear:1,  fogFar:14, hasCeiling:false, props:'void' },
+];
 
+// ============================================================
+// Setup
+// ============================================================
+const scene = new THREE.Scene();
 const renderer = new THREE.WebGLRenderer({ antialias: false });
 renderer.setPixelRatio(Math.min(window.devicePixelRatio, 1.5));
 renderer.setSize(innerWidth, innerHeight);
 document.body.appendChild(renderer.domElement);
 
-const camera = new THREE.PerspectiveCamera(75, innerWidth / innerHeight, 0.1, 80);
+const camera = new THREE.PerspectiveCamera(75, innerWidth / innerHeight, 0.1, 120);
 camera.position.set(0, 1.7, 0);
 
 const controls = new PointerLockControls(camera, renderer.domElement);
@@ -117,7 +187,15 @@ addEventListener('resize', () => {
   renderer.setSize(innerWidth, innerHeight);
 });
 
-// ---------- Procedural carpet/wall textures ----------
+const flashlight = new THREE.SpotLight(0xfff5c8, 0, 22, Math.PI/5, 0.35, 1.0);
+flashlight.position.set(0, 0, 0.1);
+flashlight.target.position.set(0, 0, -1);
+camera.add(flashlight);
+camera.add(flashlight.target);
+
+// ============================================================
+// Procedural noise textures
+// ============================================================
 function makeNoiseTexture(size, base, variance, scale = 1) {
   const c = document.createElement('canvas');
   c.width = c.height = size;
@@ -137,275 +215,606 @@ function makeNoiseTexture(size, base, variance, scale = 1) {
   return tex;
 }
 
-const wallTex    = makeNoiseTexture(128, [212, 187, 96], 32, 2);   // mono-yellow wallpaper
-const carpetTex  = makeNoiseTexture(128, [110, 70, 35], 50, 4);    // damp brown carpet
-const ceilingTex = makeNoiseTexture(128, [180, 170, 140], 25, 2);  // stained tiles
-
-const wallMat    = new THREE.MeshLambertMaterial({ map: wallTex });
-const carpetMat  = new THREE.MeshLambertMaterial({ map: carpetTex });
-const ceilingMat = new THREE.MeshLambertMaterial({ map: ceilingTex });
-
-// ---------- Procedural maze ----------
-const CELL = 4;            // size of one cell in meters
-const GRID = 31;           // odd number, must be odd for maze
+// ============================================================
+// Level state
+// ============================================================
+const CELL = 4;
+const GRID = 27;
 const WALL_HEIGHT = 3.0;
-const cells = [];          // cells[x][z] = { walls: bool } (true = wall)
 
-// Initialize all walls
-for (let x = 0; x < GRID; x++) {
-  cells[x] = [];
-  for (let z = 0; z < GRID; z++) cells[x][z] = { wall: true };
-}
+let levelGroup = null;
+let wallBoxes = [];
+let lights = [];
+let almonds = [];
+let entities = [];
+let stairExit = null;
+let elevator = null;
+let currentLevel = 0;
+let cells = [];
 
-// Carve recursive backtracker
-function carve(x, z) {
-  cells[x][z].wall = false;
-  const dirs = [[2,0],[-2,0],[0,2],[0,-2]].sort(() => Math.random() - 0.5);
-  for (const [dx, dz] of dirs) {
-    const nx = x + dx, nz = z + dz;
-    if (nx > 0 && nx < GRID-1 && nz > 0 && nz < GRID-1 && cells[nx][nz].wall) {
-      cells[x + dx/2][z + dz/2].wall = false;
-      carve(nx, nz);
-    }
-  }
-}
-carve(1, 1);
-
-// Knock out ~12% of remaining walls to create open rooms (very Backrooms)
-for (let x = 1; x < GRID-1; x++) {
-  for (let z = 1; z < GRID-1; z++) {
-    if (cells[x][z].wall && Math.random() < 0.12) cells[x][z].wall = false;
-  }
-}
-
-// Build geometry: instanced wall blocks
-const wallGeom = new THREE.BoxGeometry(CELL, WALL_HEIGHT, CELL);
-let wallCount = 0;
-for (let x = 0; x < GRID; x++)
-  for (let z = 0; z < GRID; z++)
-    if (cells[x][z].wall) wallCount++;
-
-const wallMesh = new THREE.InstancedMesh(wallGeom, wallMat, wallCount);
-const dummy = new THREE.Object3D();
-let idx = 0;
-const wallBoxes = []; // for collision
-
-for (let x = 0; x < GRID; x++) {
-  for (let z = 0; z < GRID; z++) {
-    if (cells[x][z].wall) {
-      const wx = (x - GRID/2) * CELL;
-      const wz = (z - GRID/2) * CELL;
-      dummy.position.set(wx, WALL_HEIGHT/2, wz);
-      dummy.updateMatrix();
-      wallMesh.setMatrixAt(idx++, dummy.matrix);
-      wallBoxes.push({ x: wx, z: wz, half: CELL/2 });
-    }
-  }
-}
-scene.add(wallMesh);
-
-// Floor
-const floorGeom = new THREE.PlaneGeometry(GRID*CELL, GRID*CELL);
-carpetTex.repeat.set(GRID, GRID);
-const floor = new THREE.Mesh(floorGeom, carpetMat);
-floor.rotation.x = -Math.PI/2;
-scene.add(floor);
-
-// Ceiling
-ceilingTex.repeat.set(GRID, GRID);
-const ceiling = new THREE.Mesh(floorGeom, ceilingMat);
-ceiling.rotation.x = Math.PI/2;
-ceiling.position.y = WALL_HEIGHT;
-scene.add(ceiling);
-
-// ---------- Lighting (fluorescent panels) ----------
-scene.add(new THREE.AmbientLight(0x665533, 0.35));
-
-const lights = [];
-const panelGeom = new THREE.BoxGeometry(1.6, 0.05, 0.4);
-const panelMat = new THREE.MeshBasicMaterial({ color: 0xfff2b0 });
-
-// Place a flickering point light every few cells in open spaces
-for (let x = 1; x < GRID-1; x += 3) {
-  for (let z = 1; z < GRID-1; z += 3) {
-    if (cells[x][z].wall) continue;
-    const wx = (x - GRID/2) * CELL;
-    const wz = (z - GRID/2) * CELL;
-    const light = new THREE.PointLight(0xfff0b8, 1.2, 9, 1.6);
-    light.position.set(wx, WALL_HEIGHT - 0.2, wz);
-    scene.add(light);
-
-    const panel = new THREE.Mesh(panelGeom, panelMat.clone());
-    panel.position.copy(light.position);
-    panel.position.y = WALL_HEIGHT - 0.05;
-    scene.add(panel);
-
-    lights.push({ light, panel, baseIntensity: 1.2, flickerSeed: Math.random()*100, broken: Math.random() < 0.08 });
-  }
-}
-
-// Player flashlight — child of camera so it follows view
-const flashlight = new THREE.SpotLight(0xfff5c8, 0, 22, Math.PI/5, 0.35, 1.0);
-flashlight.position.set(0, 0, 0.1);
-flashlight.target.position.set(0, 0, -1);
-camera.add(flashlight);
-camera.add(flashlight.target);
-
-// ---------- 杏仁水 (Almond Water) pickups ----------
-const almonds = []; // { mesh, glow, alive }
-const almondBodyGeom = new THREE.CylinderGeometry(0.08, 0.08, 0.28, 10);
-const almondCapGeom  = new THREE.CylinderGeometry(0.06, 0.06, 0.06, 10);
-const almondBodyMat  = new THREE.MeshBasicMaterial({ color: 0xf6e29a, transparent: true, opacity: 0.85 });
-const almondCapMat   = new THREE.MeshBasicMaterial({ color: 0x6b5018 });
-
-const openCells = [];
-for (let x = 1; x < GRID-1; x++)
-  for (let z = 1; z < GRID-1; z++)
-    if (!cells[x][z].wall) openCells.push([x, z]);
-
-// Scatter ~18 bottles in open cells, away from spawn
-const ALMOND_COUNT = 18;
-for (let i = 0; i < ALMOND_COUNT && openCells.length; i++) {
-  const idx = Math.floor(Math.random() * openCells.length);
-  const [cx, cz] = openCells.splice(idx, 1)[0];
-  const wx = (cx - GRID/2) * CELL + (Math.random() - 0.5) * 1.2;
-  const wz = (cz - GRID/2) * CELL + (Math.random() - 0.5) * 1.2;
-
-  const group = new THREE.Group();
-  const body = new THREE.Mesh(almondBodyGeom, almondBodyMat);
-  const cap = new THREE.Mesh(almondCapGeom, almondCapMat);
-  cap.position.y = 0.17;
-  group.add(body); group.add(cap);
-  group.position.set(wx, 0.18, wz);
-  scene.add(group);
-
-  const glow = new THREE.PointLight(0xfff0a0, 0.4, 2.0, 2);
-  glow.position.copy(group.position);
-  glow.position.y = 0.5;
-  scene.add(glow);
-
-  almonds.push({ mesh: group, glow, alive: true, baseY: 0.18, seed: Math.random()*Math.PI*2 });
-}
-
-// ---------- Entity (The Smiler) ----------
-const entityGeom = new THREE.CapsuleGeometry(0.35, 1.4, 4, 8);
-const entityMat = new THREE.MeshBasicMaterial({ color: 0x000000 });
-const entity = new THREE.Mesh(entityGeom, entityMat);
-entity.position.set(GRID/2 * CELL * 0.4, 1.2, GRID/2 * CELL * 0.4);
-scene.add(entity);
-
-// Glowing eyes
-const eyeMat = new THREE.MeshBasicMaterial({ color: 0xffffff });
-const eyeGeom = new THREE.SphereGeometry(0.06, 6, 6);
-const leftEye = new THREE.Mesh(eyeGeom, eyeMat);
-const rightEye = new THREE.Mesh(eyeGeom, eyeMat);
-leftEye.position.set(-0.12, 0.5, -0.32);
-rightEye.position.set(0.12, 0.5, -0.32);
-entity.add(leftEye);
-entity.add(rightEye);
-
-// ---------- Player state ----------
+// ============================================================
+// Player + companions
+// ============================================================
 const player = {
-  vel: new THREE.Vector3(),
-  onGround: true,
-  stamina: 1.0,
-  sanity: 1.0,
-  flashlightOn: false,
-  flashlightBattery: 1.0,
-  startPos: new THREE.Vector3(0, 1.7, 0),
+  hp: 1.0, sanity: 1.0, stamina: 1.0,
+  flashlightOn: false, flashlightBattery: 1.0,
   totalDist: 0,
-  lastPos: new THREE.Vector3(0, 1.7, 0),
-  speedBoost: 0,        // seconds remaining
+  speedBoost: 0,
   almondsCollected: 0,
+  lastPos: new THREE.Vector3(),
 };
 
-// Find an open spawn near center
-for (let r = 0; r < 5; r++) {
-  for (let dx = -r; dx <= r; dx++) {
-    for (let dz = -r; dz <= r; dz++) {
-      const cx = Math.floor(GRID/2) + dx;
-      const cz = Math.floor(GRID/2) + dz;
-      if (!cells[cx][cz].wall) {
-        const wx = (cx - GRID/2) * CELL;
-        const wz = (cz - GRID/2) * CELL;
-        controls.getObject().position.set(wx, 1.7, wz);
-        player.startPos.set(wx, 1.7, wz);
-        player.lastPos.copy(controls.getObject().position);
-        r = 99; break;
+const companions = [
+  { name:'小王', color:0x6bb0ff, mesh:null, hp:1.0, alive:true, offset: new THREE.Vector3(-1.5, 0, 1.5) },
+  { name:'小李', color:0xffae6b, mesh:null, hp:1.0, alive:true, offset: new THREE.Vector3( 1.5, 0, 1.5) },
+];
+
+function buildCompanionMesh(shirtColor, pantsColor = 0x2a2a3a) {
+  const g = new THREE.Group();
+  const skin = new THREE.MeshLambertMaterial({ color: 0xf0d2b0 });
+  const shirt = new THREE.MeshLambertMaterial({ color: shirtColor });
+  const pants = new THREE.MeshLambertMaterial({ color: pantsColor });
+  const hair = new THREE.MeshLambertMaterial({ color: 0x1a1208 });
+  const shoe = new THREE.MeshLambertMaterial({ color: 0x111111 });
+  const eyeMat = new THREE.MeshBasicMaterial({ color: 0x111111 });
+
+  // Torso
+  const torso = new THREE.Mesh(new THREE.BoxGeometry(0.55, 0.75, 0.30), shirt);
+  torso.position.y = 1.20;
+  g.add(torso);
+
+  // Hips / pelvis
+  const hips = new THREE.Mesh(new THREE.BoxGeometry(0.50, 0.18, 0.28), pants);
+  hips.position.y = 0.78;
+  g.add(hips);
+
+  // Neck
+  const neck = new THREE.Mesh(new THREE.CylinderGeometry(0.07, 0.08, 0.10, 10), skin);
+  neck.position.y = 1.63;
+  g.add(neck);
+
+  // Head + hair
+  const head = new THREE.Mesh(new THREE.BoxGeometry(0.30, 0.34, 0.28), skin);
+  head.position.y = 1.83;
+  g.add(head);
+  const hairTop = new THREE.Mesh(new THREE.BoxGeometry(0.32, 0.10, 0.30), hair);
+  hairTop.position.y = 2.01;
+  g.add(hairTop);
+
+  // Eyes
+  const eyeG = new THREE.SphereGeometry(0.025, 6, 6);
+  const lEye = new THREE.Mesh(eyeG, eyeMat);
+  const rEye = new THREE.Mesh(eyeG, eyeMat);
+  lEye.position.set(-0.07, 1.86, -0.145);
+  rEye.position.set( 0.07, 1.86, -0.145);
+  g.add(lEye); g.add(rEye);
+
+  // Arms (shoulder + forearm) — pivots so we can swing them
+  function makeArm(side) {
+    const arm = new THREE.Group();
+    arm.position.set(side * 0.33, 1.55, 0); // shoulder pivot
+    const upper = new THREE.Mesh(new THREE.BoxGeometry(0.14, 0.40, 0.14), shirt);
+    upper.position.y = -0.20;
+    arm.add(upper);
+    const elbow = new THREE.Group();
+    elbow.position.y = -0.40;
+    const fore = new THREE.Mesh(new THREE.BoxGeometry(0.13, 0.38, 0.13), skin);
+    fore.position.y = -0.19;
+    elbow.add(fore);
+    arm.add(elbow);
+    g.add(arm);
+    return arm;
+  }
+  const leftArm  = makeArm(-1);
+  const rightArm = makeArm( 1);
+
+  // Legs
+  function makeLeg(side) {
+    const leg = new THREE.Group();
+    leg.position.set(side * 0.13, 0.70, 0); // hip pivot
+    const upper = new THREE.Mesh(new THREE.BoxGeometry(0.18, 0.42, 0.18), pants);
+    upper.position.y = -0.21;
+    leg.add(upper);
+    const knee = new THREE.Group();
+    knee.position.y = -0.42;
+    const lower = new THREE.Mesh(new THREE.BoxGeometry(0.17, 0.38, 0.17), pants);
+    lower.position.y = -0.19;
+    knee.add(lower);
+    const foot = new THREE.Mesh(new THREE.BoxGeometry(0.20, 0.08, 0.30), shoe);
+    foot.position.set(0, -0.40, 0.04);
+    knee.add(foot);
+    leg.add(knee);
+    g.add(leg);
+    return leg;
+  }
+  const leftLeg  = makeLeg(-1);
+  const rightLeg = makeLeg( 1);
+
+  g.userData.rig = { leftArm, rightArm, leftLeg, rightLeg, head };
+  return g;
+}
+
+// ============================================================
+// Maze
+// ============================================================
+function buildMaze() {
+  cells = [];
+  for (let x = 0; x < GRID; x++) {
+    cells[x] = [];
+    for (let z = 0; z < GRID; z++) cells[x][z] = { wall: true };
+  }
+  function carve(x, z) {
+    cells[x][z].wall = false;
+    const dirs = [[2,0],[-2,0],[0,2],[0,-2]].sort(() => Math.random() - 0.5);
+    for (const [dx, dz] of dirs) {
+      const nx = x + dx, nz = z + dz;
+      if (nx > 0 && nx < GRID-1 && nz > 0 && nz < GRID-1 && cells[nx][nz].wall) {
+        cells[x + dx/2][z + dz/2].wall = false;
+        carve(nx, nz);
       }
     }
-    if (r === 99) break;
   }
+  carve(1, 1);
+  for (let x = 1; x < GRID-1; x++)
+    for (let z = 1; z < GRID-1; z++)
+      if (cells[x][z].wall && Math.random() < 0.18) cells[x][z].wall = false;
 }
 
-// ---------- Input ----------
-const keys = {};
-addEventListener('keydown', e => {
-  keys[e.code] = true;
-  if (e.code === 'KeyF') {
-    player.flashlightOn = !player.flashlightOn;
-  }
-  if (e.code === 'Enter') {
-    if (overlay.style.display !== 'none') {
-      controls.lock();
-    } else if (deathScreen.style.display === 'flex') {
-      respawn();
+// ============================================================
+// Level builder
+// ============================================================
+function disposeLevel() {
+  if (!levelGroup) return;
+  scene.remove(levelGroup);
+  levelGroup.traverse(o => {
+    if (o.geometry) o.geometry.dispose && o.geometry.dispose();
+    if (o.material) {
+      if (Array.isArray(o.material)) o.material.forEach(m => m.dispose());
+      else o.material.dispose();
+    }
+  });
+  levelGroup = null;
+  wallBoxes = []; lights = []; almonds = []; entities = []; stairExit = null; elevator = null;
+}
+
+function buildLevel(n) {
+  disposeLevel();
+  const cfg = LEVELS[n];
+  currentLevel = n;
+  scene.background = new THREE.Color(cfg.fogHex);
+  scene.fog = new THREE.Fog(cfg.fogHex, cfg.fogNear, cfg.fogFar);
+
+  levelGroup = new THREE.Group();
+  scene.add(levelGroup);
+
+  buildMaze();
+
+  const wallTex   = makeNoiseTexture(128, cfg.wallRGB, 32, 2);
+  const floorTex  = makeNoiseTexture(128, cfg.floorRGB, 50, GRID);
+  const ceilTex   = makeNoiseTexture(128, cfg.ceilRGB, 25, GRID);
+  const wallMat   = new THREE.MeshLambertMaterial({ map: wallTex });
+  const floorMat  = new THREE.MeshLambertMaterial({ map: floorTex });
+  const ceilMat   = new THREE.MeshLambertMaterial({ map: ceilTex });
+
+  const wallGeom = new THREE.BoxGeometry(CELL, WALL_HEIGHT, CELL);
+  let wallCount = 0;
+  for (let x = 0; x < GRID; x++)
+    for (let z = 0; z < GRID; z++)
+      if (cells[x][z].wall) wallCount++;
+  const wallMesh = new THREE.InstancedMesh(wallGeom, wallMat, wallCount);
+  const dummy = new THREE.Object3D();
+  let idx = 0;
+  for (let x = 0; x < GRID; x++) {
+    for (let z = 0; z < GRID; z++) {
+      if (cells[x][z].wall) {
+        const wx = (x - GRID/2) * CELL, wz = (z - GRID/2) * CELL;
+        dummy.position.set(wx, WALL_HEIGHT/2, wz);
+        dummy.updateMatrix();
+        wallMesh.setMatrixAt(idx++, dummy.matrix);
+        wallBoxes.push({ x: wx, z: wz, half: CELL/2 });
+      }
     }
   }
-});
-addEventListener('keyup', e => { keys[e.code] = false; });
+  levelGroup.add(wallMesh);
 
-const overlay = document.getElementById('overlay');
-const deathScreen = document.getElementById('deathScreen');
+  const planeGeom = new THREE.PlaneGeometry(GRID*CELL, GRID*CELL);
+  const floor = new THREE.Mesh(planeGeom, floorMat);
+  floor.rotation.x = -Math.PI/2;
+  levelGroup.add(floor);
 
-function respawn() {
-  controls.getObject().position.copy(player.startPos);
-  player.vel.set(0,0,0);
-  player.stamina = 1.0;
-  player.sanity = 1.0;
-  player.totalDist = 0;
-  entity.position.set(GRID/2 * CELL * 0.4, 1.2, GRID/2 * CELL * 0.4);
-  deathScreen.style.display = 'none';
-  controls.lock();
+  if (cfg.hasCeiling) {
+    const ceiling = new THREE.Mesh(planeGeom.clone(), ceilMat);
+    ceiling.rotation.x = Math.PI/2;
+    ceiling.position.y = WALL_HEIGHT;
+    levelGroup.add(ceiling);
+  } else {
+    const skyMat = new THREE.MeshBasicMaterial({ color: cfg.fogHex, side: THREE.BackSide });
+    const sky = new THREE.Mesh(new THREE.SphereGeometry(60, 12, 10), skyMat);
+    levelGroup.add(sky);
+  }
+
+  levelGroup.add(new THREE.AmbientLight(cfg.ambient, 0.55));
+
+  const panelGeom = new THREE.BoxGeometry(1.6, 0.05, 0.4);
+  const panelMat = new THREE.MeshBasicMaterial({ color: cfg.lightHex });
+  for (let x = 1; x < GRID-1; x += 3) {
+    for (let z = 1; z < GRID-1; z += 3) {
+      if (cells[x][z].wall) continue;
+      const wx = (x - GRID/2) * CELL, wz = (z - GRID/2) * CELL;
+      const light = new THREE.PointLight(cfg.lightHex, 1.2, 9, 1.6);
+      light.position.set(wx, WALL_HEIGHT - 0.2, wz);
+      levelGroup.add(light);
+      const panel = new THREE.Mesh(panelGeom, panelMat.clone());
+      panel.position.copy(light.position);
+      panel.position.y = WALL_HEIGHT - 0.05;
+      levelGroup.add(panel);
+      lights.push({ light, panel, base: 1.2, seed: Math.random()*100, broken: Math.random() < 0.08 });
+    }
+  }
+
+  const openCells = [];
+  for (let x = 1; x < GRID-1; x++)
+    for (let z = 1; z < GRID-1; z++)
+      if (!cells[x][z].wall) openCells.push([x, z]);
+
+  let spawnX = 0, spawnZ = 0;
+  outer: for (let r = 0; r < 5; r++) {
+    for (let dx = -r; dx <= r; dx++)
+      for (let dz = -r; dz <= r; dz++) {
+        const cx = Math.floor(GRID/2)+dx, cz = Math.floor(GRID/2)+dz;
+        if (cx>=0 && cz>=0 && cx<GRID && cz<GRID && !cells[cx][cz].wall) {
+          spawnX = (cx - GRID/2)*CELL; spawnZ = (cz - GRID/2)*CELL;
+          break outer;
+        }
+      }
+  }
+  controls.getObject().position.set(spawnX, 1.7, spawnZ);
+  player.lastPos.copy(controls.getObject().position);
+
+  for (const c of companions) {
+    if (!c.alive) continue;
+    c.mesh = buildCompanionMesh(c.color);
+    c.mesh.position.set(spawnX + c.offset.x, 0, spawnZ + c.offset.z);
+    levelGroup.add(c.mesh);
+  }
+
+  // Almond water
+  const almondCount = Math.max(6, 14 - n);
+  const almondBodyGeom = new THREE.CylinderGeometry(0.08, 0.08, 0.28, 10);
+  const almondCapGeom  = new THREE.CylinderGeometry(0.06, 0.06, 0.06, 10);
+  const almondBodyMat  = new THREE.MeshBasicMaterial({ color: 0xf6e29a, transparent: true, opacity: 0.85 });
+  const almondCapMat   = new THREE.MeshBasicMaterial({ color: 0x6b5018 });
+  const candidate = openCells.slice();
+  for (let i = 0; i < almondCount && candidate.length; i++) {
+    const k = Math.floor(Math.random() * candidate.length);
+    const [cx, cz] = candidate.splice(k, 1)[0];
+    const wx = (cx - GRID/2)*CELL + (Math.random()-0.5)*1.2;
+    const wz = (cz - GRID/2)*CELL + (Math.random()-0.5)*1.2;
+    const g = new THREE.Group();
+    const body = new THREE.Mesh(almondBodyGeom, almondBodyMat);
+    const cap  = new THREE.Mesh(almondCapGeom, almondCapMat);
+    cap.position.y = 0.17;
+    g.add(body); g.add(cap);
+    g.position.set(wx, 0.18, wz);
+    levelGroup.add(g);
+    const glow = new THREE.PointLight(0xfff0a0, 0.4, 2.0, 2);
+    glow.position.set(wx, 0.5, wz);
+    levelGroup.add(glow);
+    almonds.push({ mesh: g, glow, alive:true, baseY:0.18, seed: Math.random()*Math.PI*2 });
+  }
+
+  // Stair exit at far corner
+  let exitCell = null, bestDist = -1;
+  for (const [cx, cz] of openCells) {
+    const wx = (cx - GRID/2)*CELL, wz = (cz - GRID/2)*CELL;
+    const d = (wx-spawnX)*(wx-spawnX) + (wz-spawnZ)*(wz-spawnZ);
+    if (d > bestDist) { bestDist = d; exitCell = [cx, cz]; }
+  }
+  if (exitCell) {
+    const [cx, cz] = exitCell;
+    const wx = (cx - GRID/2)*CELL, wz = (cz - GRID/2)*CELL;
+    const isFinal = n === LEVELS.length - 1;
+    const stair = new THREE.Group();
+    const stepMat = new THREE.MeshLambertMaterial({ color: 0x3a3a3a });
+    const stepCount = 6, stepW = 1.6, stepH = 0.18, stepD = 0.35;
+    for (let i = 0; i < stepCount; i++) {
+      const step = new THREE.Mesh(new THREE.BoxGeometry(stepW, stepH, stepD), stepMat);
+      step.position.set(0, -i * stepH + stepH/2, -i * stepD - stepD/2);
+      stair.add(step);
+    }
+    const pit = new THREE.Mesh(
+      new THREE.BoxGeometry(stepW + 0.1, 0.05, stepD * stepCount),
+      new THREE.MeshBasicMaterial({ color: 0x000000 })
+    );
+    pit.position.set(0, -stepCount * stepH - 0.02, -stepD * stepCount / 2 - stepD/2);
+    stair.add(pit);
+    const railMat = new THREE.MeshLambertMaterial({ color: 0x222222 });
+    for (const sx of [-stepW/2 - 0.05, stepW/2 + 0.05]) {
+      const rail = new THREE.Mesh(
+        new THREE.BoxGeometry(0.08, 1.0, stepD * stepCount + 0.1), railMat
+      );
+      rail.position.set(sx, 0.4, -stepD * stepCount / 2 - stepD/2);
+      stair.add(rail);
+    }
+    const pillar = new THREE.Mesh(
+      new THREE.BoxGeometry(0.25, 2.0, 0.25),
+      new THREE.MeshBasicMaterial({ color: isFinal ? 0x88ff88 : 0xff5544 })
+    );
+    pillar.position.set(0, 1.0, 0.4);
+    stair.add(pillar);
+    const exitLight = new THREE.PointLight(isFinal ? 0xaaffaa : 0xff6666, 1.8, 8, 2);
+    exitLight.position.set(0, 1.8, 0);
+    stair.add(exitLight);
+    stair.rotation.y = Math.atan2(-wx, -wz);
+    stair.position.set(wx, 0, wz);
+    levelGroup.add(stair);
+    stairExit = { mesh: stair, pos: new THREE.Vector3(wx, 0, wz), pillar, isFinal };
+  }
+
+  // ---------- Elevator (warp to any floor) ----------
+  // Find an open cell near the spawn that's not the spawn itself
+  let elevCell = null, elevBest = Infinity;
+  for (const [cx, cz] of openCells) {
+    const wx = (cx - GRID/2)*CELL, wz = (cz - GRID/2)*CELL;
+    const dSpawn = (wx-spawnX)*(wx-spawnX) + (wz-spawnZ)*(wz-spawnZ);
+    if (dSpawn < 1.0) continue;
+    if (stairExit) {
+      const sx = wx - stairExit.pos.x, sz = wz - stairExit.pos.z;
+      if (sx*sx + sz*sz < 16) continue;
+    }
+    if (dSpawn < elevBest && dSpawn > 4) { elevBest = dSpawn; elevCell = [cx, cz]; }
+  }
+  if (elevCell) {
+    const [ex, ez] = elevCell;
+    const wx = (ex - GRID/2)*CELL, wz = (ez - GRID/2)*CELL;
+    const elev = new THREE.Group();
+    const cabinMat = new THREE.MeshLambertMaterial({ color: 0x806030 });
+    const cabin = new THREE.Mesh(new THREE.BoxGeometry(1.6, 2.4, 1.0), cabinMat);
+    cabin.position.y = 1.2;
+    elev.add(cabin);
+    const back = new THREE.Mesh(
+      new THREE.BoxGeometry(1.5, 2.2, 0.05),
+      new THREE.MeshBasicMaterial({ color: 0x2a2018 })
+    );
+    back.position.set(0, 1.1, -0.45);
+    elev.add(back);
+    // Door split
+    const doorMat = new THREE.MeshLambertMaterial({ color: 0xc0a060 });
+    const dL = new THREE.Mesh(new THREE.BoxGeometry(0.74, 2.1, 0.04), doorMat);
+    const dR = new THREE.Mesh(new THREE.BoxGeometry(0.74, 2.1, 0.04), doorMat);
+    dL.position.set(-0.38, 1.05, 0.51);
+    dR.position.set( 0.38, 1.05, 0.51);
+    elev.add(dL); elev.add(dR);
+    // Call button
+    const btn = new THREE.Mesh(
+      new THREE.SphereGeometry(0.06, 8, 8),
+      new THREE.MeshBasicMaterial({ color: 0x66ddff })
+    );
+    btn.position.set(0.9, 1.2, 0.5);
+    elev.add(btn);
+    const elevLight = new THREE.PointLight(0x66ddff, 0.9, 4, 2);
+    elevLight.position.set(0, 2.2, 0.4);
+    elev.add(elevLight);
+    elev.rotation.y = Math.atan2(-wx, -wz);
+    elev.position.set(wx, 0, wz);
+    levelGroup.add(elev);
+    elevator = { mesh: elev, pos: new THREE.Vector3(wx, 0, wz), btn };
+  }
+
+  spawnProps(cfg, openCells);
+
+  const numEntities = 1 + Math.floor(n / 3);
+  for (let i = 0; i < numEntities; i++) {
+    const eg = new THREE.Group();
+    const body = new THREE.Mesh(
+      new THREE.CapsuleGeometry(0.35, 1.4, 4, 8),
+      new THREE.MeshBasicMaterial({ color: 0x000000 })
+    );
+    body.position.y = 1.0;
+    eg.add(body);
+    const eye = new THREE.MeshBasicMaterial({ color: 0xffffff });
+    const eyeG = new THREE.SphereGeometry(0.07, 6, 6);
+    const l = new THREE.Mesh(eyeG, eye), r = new THREE.Mesh(eyeG, eye);
+    l.position.set(-0.12, 1.5, -0.32); r.position.set(0.12, 1.5, -0.32);
+    eg.add(l); eg.add(r);
+    const ec = openCells[Math.floor(Math.random()*openCells.length)];
+    eg.position.set((ec[0]-GRID/2)*CELL, 0, (ec[1]-GRID/2)*CELL);
+    levelGroup.add(eg);
+    entities.push({ mesh: eg, speed: 1.4 + n*0.18 });
+  }
+
+  showFloorTitle(n + 1, cfg.name);
 }
 
-overlay.addEventListener('click', () => {
-  controls.lock();
-});
-deathScreen.addEventListener('click', respawn);
+function spawnProps(cfg, openCells) {
+  const candidate = openCells.slice();
+  function pick(num) {
+    const out = [];
+    for (let i = 0; i < num && candidate.length; i++) {
+      const k = Math.floor(Math.random()*candidate.length);
+      out.push(candidate.splice(k,1)[0]);
+    }
+    return out;
+  }
 
-controls.addEventListener('lock', () => {
-  overlay.style.display = 'none';
-});
-controls.addEventListener('unlock', () => {
-  if (deathScreen.style.display !== 'flex') overlay.style.display = 'flex';
-});
+  switch (cfg.props) {
+    case 'cars': {
+      for (const [cx, cz] of pick(8)) {
+        const wx = (cx-GRID/2)*CELL, wz = (cz-GRID/2)*CELL;
+        const car = new THREE.Mesh(
+          new THREE.BoxGeometry(2.0, 1.0, 1.0),
+          new THREE.MeshLambertMaterial({ color: 0x223344 + Math.floor(Math.random()*0x303030) })
+        );
+        car.position.set(wx, 0.5, wz);
+        car.rotation.y = Math.random()*Math.PI*2;
+        levelGroup.add(car);
+      }
+      break;
+    }
+    case 'sparks': {
+      for (const [cx, cz] of pick(6)) {
+        const wx = (cx-GRID/2)*CELL, wz = (cz-GRID/2)*CELL;
+        const machine = new THREE.Mesh(
+          new THREE.BoxGeometry(1.2, 1.6, 0.8),
+          new THREE.MeshLambertMaterial({ color: 0x444444 })
+        );
+        machine.position.set(wx, 0.8, wz);
+        levelGroup.add(machine);
+        const spark = new THREE.PointLight(0xaaffff, 0.8, 3, 2);
+        spark.position.set(wx, 1.6, wz);
+        levelGroup.add(spark);
+        lights.push({ light: spark, panel: null, base: 0.8, seed: Math.random()*100, broken: false });
+      }
+      break;
+    }
+    case 'water': {
+      const water = new THREE.Mesh(
+        new THREE.PlaneGeometry(GRID*CELL, GRID*CELL),
+        new THREE.MeshBasicMaterial({ color: 0x4ab0d0, transparent:true, opacity:0.55 })
+      );
+      water.rotation.x = -Math.PI/2;
+      water.position.y = 0.05;
+      levelGroup.add(water);
+      break;
+    }
+    case 'crops': {
+      const cropMat = new THREE.MeshLambertMaterial({ color: 0xc8a440 });
+      for (const [cx, cz] of pick(40)) {
+        const wx = (cx-GRID/2)*CELL + (Math.random()-0.5)*2;
+        const wz = (cz-GRID/2)*CELL + (Math.random()-0.5)*2;
+        const stalk = new THREE.Mesh(new THREE.ConeGeometry(0.15, 1.2, 5), cropMat);
+        stalk.position.set(wx, 0.6, wz);
+        levelGroup.add(stalk);
+      }
+      break;
+    }
+    case 'toys': {
+      for (const [cx, cz] of pick(10)) {
+        const wx = (cx-GRID/2)*CELL, wz = (cz-GRID/2)*CELL;
+        const toy = new THREE.Mesh(
+          new THREE.BoxGeometry(0.4,0.4,0.4),
+          new THREE.MeshLambertMaterial({ color: 0xff80a0 })
+        );
+        toy.position.set(wx + (Math.random()-0.5), 0.2, wz + (Math.random()-0.5));
+        levelGroup.add(toy);
+      }
+      break;
+    }
+    case 'cubicles': {
+      for (const [cx, cz] of pick(14)) {
+        const wx = (cx-GRID/2)*CELL, wz = (cz-GRID/2)*CELL;
+        const desk = new THREE.Mesh(
+          new THREE.BoxGeometry(1.4, 0.7, 0.7),
+          new THREE.MeshLambertMaterial({ color: 0x886655 })
+        );
+        desk.position.set(wx, 0.35, wz);
+        levelGroup.add(desk);
+        const monitor = new THREE.Mesh(
+          new THREE.BoxGeometry(0.5, 0.4, 0.05),
+          new THREE.MeshBasicMaterial({ color: 0x223355 })
+        );
+        monitor.position.set(wx, 0.95, wz);
+        levelGroup.add(monitor);
+      }
+      break;
+    }
+    case 'shelves': {
+      for (const [cx, cz] of pick(12)) {
+        const wx = (cx-GRID/2)*CELL, wz = (cz-GRID/2)*CELL;
+        const shelf = new THREE.Mesh(
+          new THREE.BoxGeometry(0.5, 2.4, 1.6),
+          new THREE.MeshLambertMaterial({ color: 0x552d10 })
+        );
+        shelf.position.set(wx, 1.2, wz);
+        shelf.rotation.y = Math.random() < 0.5 ? 0 : Math.PI/2;
+        levelGroup.add(shelf);
+      }
+      break;
+    }
+    case 'rails': {
+      const railMat = new THREE.MeshBasicMaterial({ color: 0x666666 });
+      for (let i = -Math.floor(GRID/2); i < Math.floor(GRID/2); i++) {
+        const rail = new THREE.Mesh(
+          new THREE.BoxGeometry(GRID*CELL, 0.05, 0.1), railMat
+        );
+        rail.position.set(0, 0.025, i*CELL*1.5);
+        levelGroup.add(rail);
+      }
+      break;
+    }
+    case 'void': {
+      for (const [cx, cz] of pick(6)) {
+        const wx = (cx-GRID/2)*CELL, wz = (cz-GRID/2)*CELL;
+        const pillar = new THREE.Mesh(
+          new THREE.BoxGeometry(0.4, WALL_HEIGHT*1.5, 0.4),
+          new THREE.MeshBasicMaterial({ color: 0xffffff })
+        );
+        pillar.position.set(wx, WALL_HEIGHT*0.75, wz);
+        levelGroup.add(pillar);
+        const pl = new THREE.PointLight(0xffffff, 0.6, 6, 2);
+        pl.position.set(wx, WALL_HEIGHT, wz);
+        levelGroup.add(pl);
+      }
+      break;
+    }
+  }
+}
 
-// ---------- Audio (procedural hum + heartbeat) ----------
-let audioCtx, hum, humGain, heartGain;
+// ============================================================
+// Floor title
+// ============================================================
+const floorTitleEl = document.getElementById('floorTitle');
+function showFloorTitle(n, name) {
+  floorTitleEl.textContent = `Level ${n} — ${name}`;
+  floorTitleEl.style.opacity = '1';
+  document.getElementById('floorTag').textContent = `Level ${n} — ${name}`;
+  setTimeout(() => floorTitleEl.style.opacity = '0', 2500);
+}
+
+// ============================================================
+// Audio
+// ============================================================
+let audioCtx, hum, humGain;
 function initAudio() {
   if (audioCtx) return;
   audioCtx = new (window.AudioContext || window.webkitAudioContext)();
-
-  // Fluorescent hum: 60 Hz drone with harmonics
   hum = audioCtx.createOscillator();
   hum.type = 'sawtooth';
   hum.frequency.value = 60;
   humGain = audioCtx.createGain();
   humGain.gain.value = 0.04;
-  const humFilter = audioCtx.createBiquadFilter();
-  humFilter.type = 'lowpass';
-  humFilter.frequency.value = 400;
-  hum.connect(humFilter).connect(humGain).connect(audioCtx.destination);
+  const f = audioCtx.createBiquadFilter();
+  f.type = 'lowpass'; f.frequency.value = 400;
+  hum.connect(f).connect(humGain).connect(audioCtx.destination);
   hum.start();
-
-  // Heartbeat for sanity drain
-  heartGain = audioCtx.createGain();
-  heartGain.gain.value = 0;
-  heartGain.connect(audioCtx.destination);
 }
 addEventListener('click', initAudio, { once: true });
 
+function blip(freq, dur=0.2, vol=0.15) {
+  if (!audioCtx) return;
+  const t = audioCtx.currentTime;
+  const o = audioCtx.createOscillator();
+  o.frequency.setValueAtTime(freq, t);
+  const g = audioCtx.createGain();
+  g.gain.setValueAtTime(vol, t);
+  g.gain.exponentialRampToValueAtTime(0.001, t+dur);
+  o.connect(g).connect(audioCtx.destination);
+  o.start(); o.stop(t+dur);
+}
+
+function playStatic() {
+  if (!audioCtx) return;
+  const buf = audioCtx.createBuffer(1, audioCtx.sampleRate*0.15, audioCtx.sampleRate);
+  const d = buf.getChannelData(0);
+  for (let i = 0; i < d.length; i++) d[i] = (Math.random()*2-1)*0.4;
+  const s = audioCtx.createBufferSource();
+  s.buffer = buf;
+  const g = audioCtx.createGain(); g.gain.value = 0.3;
+  s.connect(g).connect(audioCtx.destination);
+  s.start();
+}
+
+let lastHeart = 0;
 function heartbeat() {
   if (!audioCtx) return;
   const now = audioCtx.currentTime;
@@ -416,120 +825,258 @@ function heartbeat() {
   g.gain.linearRampToValueAtTime(0.6 * (1 - player.sanity), now + 0.02);
   g.gain.exponentialRampToValueAtTime(0.001, now + 0.25);
   o.connect(g).connect(audioCtx.destination);
-  o.start(now);
-  o.stop(now + 0.3);
-}
-let lastHeart = 0;
-
-function playStatic() {
-  if (!audioCtx) return;
-  const buf = audioCtx.createBuffer(1, audioCtx.sampleRate * 0.15, audioCtx.sampleRate);
-  const d = buf.getChannelData(0);
-  for (let i = 0; i < d.length; i++) d[i] = (Math.random()*2-1) * 0.4;
-  const src = audioCtx.createBufferSource();
-  src.buffer = buf;
-  const g = audioCtx.createGain();
-  g.gain.value = 0.3;
-  src.connect(g).connect(audioCtx.destination);
-  src.start();
+  o.start(now); o.stop(now + 0.3);
 }
 
-// ---------- Subtitles ----------
-const sub = document.getElementById('subtitle');
+// ============================================================
+// Subtitles + TTS
+// ============================================================
+const subEl = document.getElementById('subtitle');
 let subTimer = 0;
 function say(text, duration = 4) {
-  sub.textContent = text;
-  sub.style.opacity = '1';
+  subEl.textContent = text;
+  subEl.style.opacity = '1';
   subTimer = duration;
 }
 
+// Web Speech API TTS (Chinese voice when available)
+let zhVoices = [];
+function refreshVoices() {
+  if (!('speechSynthesis' in window)) return;
+  const all = window.speechSynthesis.getVoices();
+  zhVoices = all.filter(v => /zh|cmn|chinese|mandarin/i.test(v.lang + ' ' + v.name));
+  if (zhVoices.length === 0) zhVoices = all; // fallback
+}
+if ('speechSynthesis' in window) {
+  refreshVoices();
+  window.speechSynthesis.onvoiceschanged = refreshVoices;
+}
+
+function pickVoice(speakerName) {
+  if (!zhVoices.length) return null;
+  // Hash the name so each character gets a stable distinct voice when possible
+  let h = 0; for (const ch of speakerName) h = (h*31 + ch.charCodeAt(0)) & 0xffff;
+  return zhVoices[h % zhVoices.length];
+}
+
+function speak(speakerName, line, opts = {}) {
+  if (!('speechSynthesis' in window)) return;
+  // Mark speaker as talking for head-bob
+  const c = companions.find(x => x.name === speakerName);
+  if (c) c.talking = true;
+  // Strip subtitle prefix "小王：「...」" to get raw line for TTS
+  const m = line.match(/「(.+)」/);
+  const text = m ? m[1] : line;
+  const u = new SpeechSynthesisUtterance(text);
+  u.lang = 'zh-CN';
+  u.rate = opts.rate ?? 1.0;
+  u.pitch = opts.pitch ?? 1.0;
+  const v = pickVoice(speakerName);
+  if (v) u.voice = v;
+  // Per-character pitch tweak
+  if (speakerName === '小王') { u.pitch = 0.85; u.rate = 1.0; }
+  else if (speakerName === '小李') { u.pitch = 1.25; u.rate = 1.05; }
+  else if (speakerName === '旁白') { u.pitch = 0.7;  u.rate = 0.9;  }
+  u.onend = () => { if (c) c.talking = false; };
+  u.onerror = () => { if (c) c.talking = false; };
+  window.speechSynthesis.cancel();
+  window.speechSynthesis.speak(u);
+}
+
 const whispers = [
-  "……你不该来这里……",
-  "……你听见了吗……",
-  "……这些墙不对劲……",
-  "……别停下……",
-  "……不要回头……",
-  "……它知道你的名字……",
-  "……我也曾是活人……",
-  "……出口在更深处……",
+  '……你不该来这里……',
+  '……这些墙不对劲……',
+  '……别停下……',
+  '……不要回头……',
+  '……它知道你的名字……',
+  '……我也曾是活人……',
+  '……出口在更深处……',
 ];
 
-// ---------- Collision ----------
-function collide(pos) {
-  const r = 0.35;
+const companionLines = {
+  '小王': [
+    '小王：「这地方不对劲。」',
+    '小王：「我们得快点。」',
+    '小王：「我听见有东西在墙后面。」',
+    '小王：「跟紧点别走散。」',
+  ],
+  '小李': [
+    '小李：「我害怕……」',
+    '小李：「这是几楼了？」',
+    '小李：「有杏仁水，先喝点。」',
+    '小李：「楼梯在最远的角落。」',
+  ],
+};
+
+// ============================================================
+// Input
+// ============================================================
+const keys = {};
+const elevatorPanel = document.getElementById('elevatorPanel');
+const floorListEl = document.getElementById('floorList');
+
+function isElevatorOpen() { return elevatorPanel.style.display === 'flex'; }
+
+function openElevator() {
+  floorListEl.innerHTML = LEVELS.map((L, i) =>
+    `<button data-floor="${i}" class="${i===currentLevel?'cur':''}">${i+1}. ${L.name}</button>`
+  ).join('');
+  elevatorPanel.style.display = 'flex';
+  controls.unlock();
+}
+function closeElevator() {
+  elevatorPanel.style.display = 'none';
+  controls.lock();
+}
+function gotoFloor(i) {
+  if (i < 0 || i >= LEVELS.length) return;
+  closeElevator();
+  blip(880, 0.2, 0.18); setTimeout(()=>blip(440, 0.4, 0.15), 120);
+  say(`电梯前往：${LEVELS[i].name}`, 2);
+  setTimeout(() => buildLevel(i), 500);
+}
+floorListEl.addEventListener('click', e => {
+  const t = e.target.closest('button');
+  if (t) gotoFloor(parseInt(t.dataset.floor, 10));
+});
+
+addEventListener('keydown', e => {
+  if (isElevatorOpen()) {
+    if (e.code === 'Escape') { closeElevator(); return; }
+    if (e.code >= 'Digit1' && e.code <= 'Digit9') {
+      gotoFloor(parseInt(e.code.slice(5), 10) - 1); return;
+    }
+    if (e.code === 'Digit0') { gotoFloor(9); return; }
+    return;
+  }
+  keys[e.code] = true;
+  if (e.code === 'KeyF') player.flashlightOn = !player.flashlightOn;
+  if (e.code === 'KeyE') tryInteract();
+});
+addEventListener('keyup', e => keys[e.code] = false);
+
+function tryInteract() {
+  const p = controls.getObject().position;
+  if (elevator) {
+    const dx = p.x - elevator.pos.x, dz = p.z - elevator.pos.z;
+    if (dx*dx + dz*dz < 1.8*1.8) { openElevator(); return; }
+  }
+  if (stairExit) {
+    const dx = p.x - stairExit.pos.x, dz = p.z - stairExit.pos.z;
+    if (dx*dx + dz*dz < 1.6*1.6) {
+      if (currentLevel === LEVELS.length - 1) {
+        controls.unlock();
+        document.getElementById('winScreen').style.display = 'flex';
+        return;
+      }
+      blip(660, 0.3, 0.2); blip(990, 0.4, 0.18);
+      say('下楼……');
+      setTimeout(() => buildLevel(currentLevel + 1), 600);
+    }
+  }
+}
+
+// ============================================================
+// Overlays / restart
+// ============================================================
+const overlay = document.getElementById('overlay');
+const deathScreen = document.getElementById('deathScreen');
+const winScreen = document.getElementById('winScreen');
+
+overlay.addEventListener('click', () => controls.lock());
+deathScreen.addEventListener('click', () => {
+  resetAll();
+  deathScreen.style.display = 'none';
+  controls.lock();
+});
+winScreen.addEventListener('click', () => {
+  resetAll();
+  winScreen.style.display = 'none';
+  controls.lock();
+});
+
+controls.addEventListener('lock', () => overlay.style.display = 'none');
+controls.addEventListener('unlock', () => {
+  if (deathScreen.style.display !== 'flex'
+      && winScreen.style.display !== 'flex'
+      && !isElevatorOpen())
+    overlay.style.display = 'flex';
+});
+
+function resetAll() {
+  player.hp = 1; player.sanity = 1; player.stamina = 1;
+  player.flashlightBattery = 1; player.flashlightOn = false;
+  player.totalDist = 0; player.speedBoost = 0; player.almondsCollected = 0;
+  for (const c of companions) { c.hp = 1; c.alive = true; }
+  buildLevel(0);
+}
+
+// ============================================================
+// Collision
+// ============================================================
+function collide(pos, radius=0.35) {
   for (const w of wallBoxes) {
-    const dx = pos.x - w.x;
-    const dz = pos.z - w.z;
-    if (Math.abs(dx) < w.half + r && Math.abs(dz) < w.half + r) {
-      // Push out along smaller penetration
-      const px = (w.half + r) - Math.abs(dx);
-      const pz = (w.half + r) - Math.abs(dz);
+    const dx = pos.x - w.x, dz = pos.z - w.z;
+    if (Math.abs(dx) < w.half + radius && Math.abs(dz) < w.half + radius) {
+      const px = (w.half + radius) - Math.abs(dx);
+      const pz = (w.half + radius) - Math.abs(dz);
       if (px < pz) pos.x += Math.sign(dx) * px;
       else         pos.z += Math.sign(dz) * pz;
     }
   }
-  // Outer bounds
-  const limit = (GRID/2) * CELL - 1;
+  const limit = (GRID/2)*CELL - 1;
   pos.x = Math.max(-limit, Math.min(limit, pos.x));
   pos.z = Math.max(-limit, Math.min(limit, pos.z));
 }
 
-// ---------- Game loop ----------
+// ============================================================
+// Game loop
+// ============================================================
 const clock = new THREE.Clock();
 const flashEl = document.getElementById('flash');
+let companionLineCooldown = 5;
 
 function tick() {
   const dt = Math.min(clock.getDelta(), 0.05);
   const t = clock.elapsedTime;
 
-  // ---- Movement ----
   if (controls.isLocked) {
     const boostMul = player.speedBoost > 0 ? 1.45 : 1.0;
-    const speed = (keys['ShiftLeft'] && player.stamina > 0.05 ? 6 : 3.2) * boostMul;
     const sprint = keys['ShiftLeft'] && player.stamina > 0.05;
-    const forward = (keys['KeyW'] ? 1 : 0) + (keys['KeyS'] ? -1 : 0);
-    const strafe  = (keys['KeyD'] ? 1 : 0) + (keys['KeyA'] ? -1 : 0);
+    const speed = (sprint ? 6 : 3.2) * boostMul;
+    const fwd = (keys['KeyW']?1:0) + (keys['KeyS']?-1:0);
+    const str = (keys['KeyD']?1:0) + (keys['KeyA']?-1:0);
 
     const dir = new THREE.Vector3();
-    if (forward || strafe) {
-      const fwd = new THREE.Vector3();
-      camera.getWorldDirection(fwd); fwd.y = 0; fwd.normalize();
-      const right = new THREE.Vector3().crossVectors(fwd, camera.up).normalize();
-      dir.addScaledVector(fwd, forward).addScaledVector(right, strafe).normalize();
+    if (fwd || str) {
+      const f = new THREE.Vector3();
+      camera.getWorldDirection(f); f.y = 0; f.normalize();
+      const r = new THREE.Vector3().crossVectors(f, camera.up).normalize();
+      dir.addScaledVector(f, fwd).addScaledVector(r, str).normalize();
     }
     const obj = controls.getObject();
     obj.position.addScaledVector(dir, speed * dt);
     collide(obj.position);
 
-    // head bob
-    if (dir.lengthSq() > 0) {
-      obj.position.y = 1.7 + Math.sin(t * (sprint ? 12 : 8)) * 0.04;
-    } else {
-      obj.position.y = 1.7;
-    }
+    if (dir.lengthSq() > 0) obj.position.y = 1.7 + Math.sin(t * (sprint?12:8)) * 0.04;
+    else                    obj.position.y = 1.7;
 
-    // distance + stamina
     const moved = obj.position.distanceTo(player.lastPos);
     player.totalDist += moved;
     player.lastPos.copy(obj.position);
 
-    if (sprint && dir.lengthSq() > 0) player.stamina = Math.max(0, player.stamina - dt * 0.18);
-    else                               player.stamina = Math.min(1, player.stamina + dt * 0.10);
+    if (sprint && dir.lengthSq() > 0) player.stamina = Math.max(0, player.stamina - dt*0.18);
+    else                              player.stamina = Math.min(1, player.stamina + dt*0.10);
   }
 
-  // ---- Lights flicker ----
-  for (const l of lights) {
-    if (l.broken) {
-      l.light.intensity = 0;
-      l.panel.material.color.setHex(0x222218);
-      continue;
-    }
-    const flicker = 0.85 + Math.sin(t * 30 + l.flickerSeed) * 0.05 + (Math.random() < 0.005 ? -0.6 : 0);
-    l.light.intensity = l.baseIntensity * Math.max(0.1, flicker);
-    l.panel.material.color.setRGB(0.95 * flicker, 0.9 * flicker, 0.6 * flicker);
+  for (const L of lights) {
+    if (L.broken) { L.light.intensity = 0; continue; }
+    const f = 0.85 + Math.sin(t * 30 + L.seed) * 0.05 + (Math.random() < 0.005 ? -0.6 : 0);
+    L.light.intensity = L.base * Math.max(0.1, f);
+    if (L.panel && L.panel.material && L.panel.material.color)
+      L.panel.material.color.setRGB(0.95 * f, 0.9 * f, 0.6 * f);
   }
 
-  // ---- Almond Water pickup ----
   if (player.speedBoost > 0) player.speedBoost = Math.max(0, player.speedBoost - dt);
   for (const a of almonds) {
     if (!a.alive) continue;
@@ -539,121 +1086,198 @@ function tick() {
     const dz = a.mesh.position.z - controls.getObject().position.z;
     if (dx*dx + dz*dz < 0.7*0.7) {
       a.alive = false;
-      scene.remove(a.mesh); scene.remove(a.glow);
+      levelGroup.remove(a.mesh); levelGroup.remove(a.glow);
       player.sanity = Math.min(1, player.sanity + 0.35);
       player.speedBoost = 8;
       player.almondsCollected++;
-      say('饮下杏仁水。理智 +35  速度 +45% （8秒）', 3);
-      // pickup chime
-      if (audioCtx) {
-        const o = audioCtx.createOscillator();
-        const g = audioCtx.createGain();
-        o.frequency.setValueAtTime(880, audioCtx.currentTime);
-        o.frequency.exponentialRampToValueAtTime(1320, audioCtx.currentTime + 0.18);
-        g.gain.setValueAtTime(0.15, audioCtx.currentTime);
-        g.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + 0.25);
-        o.connect(g).connect(audioCtx.destination);
-        o.start(); o.stop(audioCtx.currentTime + 0.3);
-      }
+      say('饮下杏仁水。理智 +35%　速度 +45%（8秒）', 3);
+      blip(880, 0.18, 0.18); setTimeout(()=>blip(1320, 0.2, 0.15), 80);
     }
   }
 
-  // ---- Flashlight ----
   flashlight.intensity = (player.flashlightOn && player.flashlightBattery > 0) ? 40 : 0;
   if (player.flashlightOn) {
-    player.flashlightBattery = Math.max(0, player.flashlightBattery - dt * 0.02);
+    player.flashlightBattery = Math.max(0, player.flashlightBattery - dt*0.02);
     if (player.flashlightBattery === 0) player.flashlightOn = false;
   }
 
-  // ---- Entity AI ----
-  const playerPos = controls.getObject().position;
-  const toPlayer = new THREE.Vector3().subVectors(playerPos, entity.position);
-  const dist = toPlayer.length();
-
-  // Entity speeds up as sanity drops
-  const entitySpeed = 1.4 + (1 - player.sanity) * 2.2;
-  toPlayer.y = 0;
-  toPlayer.normalize();
-
-  // Simple steering with wall avoidance
-  const next = entity.position.clone().addScaledVector(toPlayer, entitySpeed * dt);
-  let blocked = false;
-  for (const w of wallBoxes) {
-    const dx = next.x - w.x;
-    const dz = next.z - w.z;
-    if (Math.abs(dx) < w.half + 0.4 && Math.abs(dz) < w.half + 0.4) { blocked = true; break; }
-  }
-  if (!blocked) {
-    entity.position.copy(next);
-  } else {
-    // try cardinal directions
-    for (const a of [Math.PI/2, -Math.PI/2, Math.PI]) {
-      const d = toPlayer.clone().applyAxisAngle(new THREE.Vector3(0,1,0), a);
-      const n2 = entity.position.clone().addScaledVector(d, entitySpeed * dt);
-      let b2 = false;
-      for (const w of wallBoxes) {
-        const dx = n2.x - w.x;
-        const dz = n2.z - w.z;
-        if (Math.abs(dx) < w.half + 0.4 && Math.abs(dz) < w.half + 0.4) { b2 = true; break; }
+  // Companions follow in a chain + walk animation
+  const pp = controls.getObject().position;
+  let prev = pp;
+  for (const c of companions) {
+    if (!c.alive || !c.mesh) continue;
+    const target = new THREE.Vector3(prev.x + c.offset.x, 0, prev.z + c.offset.z);
+    const dx = target.x - c.mesh.position.x;
+    const dz = target.z - c.mesh.position.z;
+    const d = Math.hypot(dx, dz);
+    let walking = false;
+    if (d > 0.6) {
+      const sp = Math.min(d * 2.5, 5.0);
+      c.mesh.position.x += (dx/d) * sp * dt;
+      c.mesh.position.z += (dz/d) * sp * dt;
+      collide(c.mesh.position, 0.3);
+      c.mesh.rotation.y = Math.atan2(dx, dz);
+      walking = true;
+    }
+    // Animate limbs
+    const rig = c.mesh.userData.rig;
+    if (rig) {
+      c.walkPhase = (c.walkPhase || 0) + dt * (walking ? 9 : 2);
+      const sw = walking ? Math.sin(c.walkPhase) * 0.7 : Math.sin(c.walkPhase) * 0.05;
+      rig.leftLeg.rotation.x  =  sw;
+      rig.rightLeg.rotation.x = -sw;
+      rig.leftArm.rotation.x  = -sw * 0.8;
+      rig.rightArm.rotation.x =  sw * 0.8;
+      // Talking: bob the head
+      if (c.talking) {
+        rig.head.rotation.x = Math.sin(t * 14) * 0.08;
+      } else {
+        rig.head.rotation.x *= 0.9;
       }
-      if (!b2) { entity.position.copy(n2); break; }
+    }
+    prev = c.mesh.position;
+  }
+
+  companionLineCooldown -= dt;
+  if (companionLineCooldown <= 0) {
+    const alive = companions.filter(c => c.alive);
+    if (alive.length) {
+      const c = alive[Math.floor(Math.random()*alive.length)];
+      const lines = companionLines[c.name];
+      const line = lines[Math.floor(Math.random()*lines.length)];
+      say(line, 4);
+      speak(c.name, line);
+    }
+    companionLineCooldown = 12 + Math.random()*10;
+  }
+
+  for (const e of entities) {
+    const v = new THREE.Vector3().subVectors(pp, e.mesh.position);
+    const dist = v.length();
+    v.y = 0; v.normalize();
+    const next = e.mesh.position.clone().addScaledVector(v, e.speed * dt);
+    let blocked = false;
+    for (const w of wallBoxes) {
+      const dx = next.x - w.x, dz = next.z - w.z;
+      if (Math.abs(dx) < w.half + 0.4 && Math.abs(dz) < w.half + 0.4) { blocked = true; break; }
+    }
+    if (!blocked) e.mesh.position.copy(next);
+    else {
+      for (const a of [Math.PI/2, -Math.PI/2, Math.PI]) {
+        const dd = v.clone().applyAxisAngle(new THREE.Vector3(0,1,0), a);
+        const n2 = e.mesh.position.clone().addScaledVector(dd, e.speed * dt);
+        let b2 = false;
+        for (const w of wallBoxes) {
+          const dx = n2.x - w.x, dz = n2.z - w.z;
+          if (Math.abs(dx) < w.half + 0.4 && Math.abs(dz) < w.half + 0.4) { b2 = true; break; }
+        }
+        if (!b2) { e.mesh.position.copy(n2); break; }
+      }
+    }
+    e.mesh.lookAt(pp.x, e.mesh.position.y, pp.z);
+
+    if (dist < 1.0 && deathScreen.style.display !== 'flex') {
+      player.hp -= dt * 0.6;
+      flashEl.style.opacity = '0.6';
+      setTimeout(() => flashEl.style.opacity = '0', 120);
+    }
+    for (const c of companions) {
+      if (!c.alive || !c.mesh) continue;
+      const cd = c.mesh.position.distanceTo(e.mesh.position);
+      if (cd < 1.0) {
+        c.hp -= dt * 0.8;
+        if (c.hp <= 0) {
+          c.alive = false;
+          levelGroup.remove(c.mesh);
+          const line = `${c.name} 被吞没了……`;
+          say(line, 4);
+          speak('旁白', line, { rate: 0.8, pitch: 0.55 });
+          playStatic();
+        }
+      }
     }
   }
-  entity.lookAt(playerPos.x, entity.position.y, playerPos.z);
 
-  // Catch player
-  if (dist < 1.0 && deathScreen.style.display !== 'flex') {
+  if (player.hp <= 0 && deathScreen.style.display !== 'flex') {
     flashEl.style.opacity = '1';
-    setTimeout(() => flashEl.style.opacity = '0', 200);
+    setTimeout(() => flashEl.style.opacity = '0', 250);
     playStatic();
     deathScreen.style.display = 'flex';
     controls.unlock();
   }
 
-  // ---- Sanity ----
-  // Drains when entity is near or visible-ish; restores under bright lights
   let nearestLightDist = Infinity;
-  for (const l of lights) if (!l.broken) {
-    const d = l.light.position.distanceTo(playerPos);
+  for (const L of lights) if (!L.broken) {
+    const d = L.light.position.distanceTo(pp);
     if (d < nearestLightDist) nearestLightDist = d;
   }
   const inLight = nearestLightDist < 5;
-  const fearProx = THREE.MathUtils.clamp(1 - dist / 18, 0, 1);
-  player.sanity -= dt * (0.012 + fearProx * 0.05);
+  const fearProx = entities.length
+    ? THREE.MathUtils.clamp(1 - entities[0].mesh.position.distanceTo(pp)/18, 0, 1)
+    : 0;
+  player.sanity -= dt * (0.010 + fearProx * 0.05);
   if (inLight) player.sanity += dt * 0.02;
   player.sanity = THREE.MathUtils.clamp(player.sanity, 0, 1);
 
-  // Heartbeat frequency tied to fear
   if (audioCtx) {
     const interval = 1.6 - fearProx * 1.0;
     if (t - lastHeart > interval) { heartbeat(); lastHeart = t; }
     if (humGain) humGain.gain.value = 0.04 + (1 - player.sanity) * 0.06;
   }
 
-  // Random whispers
   if (Math.random() < dt * 0.05 * (1 - player.sanity + fearProx)) {
-    say(whispers[Math.floor(Math.random() * whispers.length)], 3);
+    const w = whispers[Math.floor(Math.random()*whispers.length)];
+    say(w, 3);
+    speak('旁白', w, { rate: 0.85, pitch: 0.6 });
   }
 
-  // ---- HUD ----
-  document.getElementById('staminaFill').style.width = (player.stamina * 100) + '%';
-  document.getElementById('sanityFill').style.width  = (player.sanity * 100) + '%';
+  if (stairExit && stairExit.pillar) {
+    const sc = 1 + Math.sin(t * 3) * 0.1;
+    stairExit.pillar.scale.set(1, sc, 1);
+  }
+
+  document.getElementById('staminaFill').style.width = (player.stamina*100)+'%';
+  document.getElementById('sanityFill').style.width  = (player.sanity *100)+'%';
+  document.getElementById('hpFill').style.width      = (Math.max(0,player.hp)*100)+'%';
   document.getElementById('distance').textContent =
     '行程：' + Math.floor(player.totalDist) + ' 米　杏仁水：' + player.almondsCollected +
     (player.speedBoost > 0 ? '　加速 ' + player.speedBoost.toFixed(1) + 's' : '');
 
-  // Fog tightens with low sanity
-  scene.fog.far = 28 - (1 - player.sanity) * 14;
+  const teamEl = document.getElementById('team');
+  teamEl.innerHTML = companions.map(c => {
+    if (!c.alive) return `<div class="member" style="color:#666">${c.name}：失踪</div>`;
+    const pct = Math.max(0, c.hp*100).toFixed(0);
+    return `<div class="member"><span class="name">${c.name}</span>` +
+           `<span class="bar"><span class="fill" style="width:${pct}%"></span></span></div>`;
+  }).join('');
 
-  // Subtitle fade
+  if (stairExit) {
+    const dx = pp.x - stairExit.pos.x, dz = pp.z - stairExit.pos.z;
+    if (dx*dx + dz*dz < 1.6*1.6) {
+      const tag = currentLevel === LEVELS.length - 1 ? '逃出后室' : '下一层';
+      if (subTimer <= 0) say(`按 E ${tag}`, 0.4);
+    }
+  }
+  if (elevator) {
+    const dx = pp.x - elevator.pos.x, dz = pp.z - elevator.pos.z;
+    if (dx*dx + dz*dz < 1.8*1.8) {
+      if (subTimer <= 0) say('按 E 进入电梯', 0.4);
+    }
+    if (elevator.btn) elevator.btn.material.color.setHSL(0.55, 0.8, 0.45 + Math.sin(t*4)*0.2);
+  }
+
+  scene.fog.far = LEVELS[currentLevel].fogFar - (1 - player.sanity) * 10;
+
   if (subTimer > 0) {
     subTimer -= dt;
-    if (subTimer <= 0) sub.style.opacity = '0';
+    if (subTimer <= 0) subEl.style.opacity = '0';
   }
 
   renderer.render(scene, camera);
   requestAnimationFrame(tick);
 }
+
+buildLevel(0);
 tick();
 </script>
 </body>
