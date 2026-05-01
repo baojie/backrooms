@@ -102,6 +102,10 @@
       捡起 <b style="color:#f6e29a">杏仁水</b> 恢复理智并加速。靠近楼梯按 E 进入下一层，或乘 <b style="color:#9ed8ff">电梯</b> 直达任意层。
     </p>
     <p style="margin-top:20px; color:#fff">点击进入 / 按 <span class="key">ENTER</span></p>
+    <button id="startBtn" autofocus
+      style="margin-top:14px; font-size:18px; padding:10px 24px; background:#553311; color:#fff; border:1px solid #aa8844; cursor:pointer; font-family:inherit; letter-spacing:4px;">
+      开始 / START
+    </button>
   </div>
 </div>
 
@@ -137,6 +141,32 @@
 }
 </script>
 
+<script>
+// Plain (non-module) bootstrap: works even if module/import fails.
+(function () {
+  const overlay = document.getElementById('overlay');
+  const btn = document.getElementById('startBtn');
+  function hideOverlay() {
+    if (overlay) overlay.style.display = 'none';
+    // Try pointer lock if module script has set it up; ignore if not.
+    try {
+      const c = window.__game && window.__game.controls;
+      if (c && c.lock) c.lock();
+    } catch {}
+  }
+  if (btn) btn.addEventListener('click', e => { e.stopPropagation(); hideOverlay(); });
+  document.addEventListener('keydown', e => {
+    if (e.code === 'Enter' || e.code === 'NumpadEnter' || e.code === 'Space') {
+      if (overlay && overlay.style.display !== 'none') {
+        e.preventDefault();
+        hideOverlay();
+      }
+    }
+  }, true);
+  if (overlay) overlay.addEventListener('click', hideOverlay);
+  console.log('[bootstrap] start handlers attached');
+})();
+</script>
 <script type="module">
 import * as THREE from 'three';
 import { PointerLockControls } from 'three/addons/controls/PointerLockControls.js';
@@ -183,6 +213,7 @@ camera.position.set(0, 1.7, 0);
 
 const controls = new PointerLockControls(camera, renderer.domElement);
 scene.add(controls.getObject());
+window.__game = { controls };
 
 addEventListener('resize', () => {
   camera.aspect = innerWidth / innerHeight;
