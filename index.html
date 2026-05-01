@@ -244,13 +244,12 @@ for (let x = 1; x < GRID-1; x += 3) {
   }
 }
 
-// Player flashlight
-const flashlight = new THREE.SpotLight(0xfff5c8, 0, 18, Math.PI/6, 0.5, 1.5);
-flashlight.position.set(0, 0, 0);
+// Player flashlight — child of camera so it follows view
+const flashlight = new THREE.SpotLight(0xfff5c8, 0, 22, Math.PI/5, 0.35, 1.0);
+flashlight.position.set(0, 0, 0.1);
+flashlight.target.position.set(0, 0, -1);
 camera.add(flashlight);
 camera.add(flashlight.target);
-flashlight.target.position.set(0, 0, -1);
-scene.add(camera);
 
 // ---------- Entity (The Smiler) ----------
 const entityGeom = new THREE.CapsuleGeometry(0.35, 1.4, 4, 8);
@@ -485,7 +484,7 @@ function tick() {
   }
 
   // ---- Flashlight ----
-  flashlight.intensity = (player.flashlightOn && player.flashlightBattery > 0) ? 2.2 : 0;
+  flashlight.intensity = (player.flashlightOn && player.flashlightBattery > 0) ? 40 : 0;
   if (player.flashlightOn) {
     player.flashlightBattery = Math.max(0, player.flashlightBattery - dt * 0.02);
     if (player.flashlightBattery === 0) player.flashlightOn = false;
