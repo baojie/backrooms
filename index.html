@@ -839,41 +839,48 @@ function say(text, duration = 4) {
   subTimer = duration;
 }
 
-// Web Speech API TTS (Chinese voice when available)
+// ---------- TTS: Piper server (preferred) → Web Speech API (fallback) ----------
+const PIPER_URL = 'http://127.0.0.1:8001';
+let piperOK = null;          // null = unknown, true/false after probe
+let currentTTSAudio = null;  // currently playing piper Audio element
+
+(async function probePiper() {
+  try {
+    const r = await fetch(PIPER_URL + '/health', { method: 'GET' });
+    piperOK = r.ok;
+  } catch { piperOK = false; }
+  console.log('[tts] piper available:', piperOK);
+})();
+
 let zhVoices = [];
 function refreshVoices() {
   if (!('speechSynthesis' in window)) return;
   const all = window.speechSynthesis.getVoices();
   zhVoices = all.filter(v => /zh|cmn|chinese|mandarin/i.test(v.lang + ' ' + v.name));
-  if (zhVoices.length === 0) zhVoices = all; // fallback
+  if (zhVoices.length === 0) zhVoices = all;
 }
 if ('speechSynthesis' in window) {
   refreshVoices();
   window.speechSynthesis.onvoiceschanged = refreshVoices;
 }
-
 function pickVoice(speakerName) {
   if (!zhVoices.length) return null;
-  // Hash the name so each character gets a stable distinct voice when possible
   let h = 0; for (const ch of speakerName) h = (h*31 + ch.charCodeAt(0)) & 0xffff;
   return zhVoices[h % zhVoices.length];
 }
 
-function speak(speakerName, line, opts = {}) {
+const SPEAKER_KEY = { '小王': 'xiaowang', '小李': 'xiaoli', '旁白': 'narrator' };
+
+function speakWebSpeech(speakerName, text, opts) {
   if (!('speechSynthesis' in window)) return;
-  // Mark speaker as talking for head-bob
   const c = companions.find(x => x.name === speakerName);
   if (c) c.talking = true;
-  // Strip subtitle prefix "小王：「...」" to get raw line for TTS
-  const m = line.match(/「(.+)」/);
-  const text = m ? m[1] : line;
   const u = new SpeechSynthesisUtterance(text);
   u.lang = 'zh-CN';
   u.rate = opts.rate ?? 1.0;
   u.pitch = opts.pitch ?? 1.0;
   const v = pickVoice(speakerName);
   if (v) u.voice = v;
-  // Per-character pitch tweak
   if (speakerName === '小王') { u.pitch = 0.85; u.rate = 1.0; }
   else if (speakerName === '小李') { u.pitch = 1.25; u.rate = 1.05; }
   else if (speakerName === '旁白') { u.pitch = 0.7;  u.rate = 0.9;  }
@@ -881,6 +888,40 @@ function speak(speakerName, line, opts = {}) {
   u.onerror = () => { if (c) c.talking = false; };
   window.speechSynthesis.cancel();
   window.speechSynthesis.speak(u);
+}
+
+function speak(speakerName, line, opts = {}) {
+  // Strip "小王：「...」" prefix
+  const m = line.match(/「(.+)」/);
+  const text = m ? m[1] : line;
+  const c = companions.find(x => x.name === speakerName);
+
+  // Try Piper if available
+  if (piperOK) {
+    if (c) c.talking = true;
+    if (currentTTSAudio) { try { currentTTSAudio.pause(); } catch {} currentTTSAudio = null; }
+    const speaker = SPEAKER_KEY[speakerName] || 'default';
+    const url = `${PIPER_URL}/tts?speaker=${speaker}&text=${encodeURIComponent(text)}`;
+    const a = new Audio(url);
+    currentTTSAudio = a;
+    a.addEventListener('ended', () => { if (c) c.talking = false; if (currentTTSAudio === a) currentTTSAudio = null; });
+    a.addEventListener('error', () => {
+      // Server died mid-session — fall back for this and subsequent lines
+      piperOK = false;
+      if (c) c.talking = false;
+      currentTTSAudio = null;
+      speakWebSpeech(speakerName, text, opts);
+    });
+    a.play().catch(() => {
+      piperOK = false;
+      if (c) c.talking = false;
+      speakWebSpeech(speakerName, text, opts);
+    });
+    return;
+  }
+
+  // Fallback: Web Speech API
+  speakWebSpeech(speakerName, text, opts);
 }
 
 const whispers = [
