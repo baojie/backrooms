@@ -583,7 +583,234 @@ let humanProto = null;
 let humanAnims = null;
 let humanLoaded = false;
 
-// Soldier GLTF disabled: 100-team mode uses procedural feminine figures.
+// Re-enabled: load Soldier.glb once, hide its mesh, and attach feminine
+// procedural parts to its bones. Each companion gets the skeleton + Idle/Walk
+// animations from the GLTF, but the look is our own — solving the "Soldier
+// looks ugly" complaint while keeping animation quality.
+const _gltfLoader = new GLTFLoader();
+_gltfLoader.load(
+  'https://threejs.org/examples/models/gltf/Soldier.glb',
+  (gltf) => {
+    humanProto = gltf.scene;
+    humanAnims = gltf.animations || [];
+    humanLoaded = true;
+    console.log('[gltf] Soldier loaded — animations:', humanAnims.map(a => a.name));
+    // Swap any existing procedural placeholders with the rigged feminine version
+    for (const c of companions) {
+      if (c.alive && c.mesh && !c.mesh.userData.gltf && levelGroup) {
+        const oldPos = c.mesh.position.clone();
+        const oldRot = c.mesh.rotation.y;
+        levelGroup.remove(c.mesh);
+        c.mesh = buildCompanionMesh(c, undefined, c.name);
+        c.mesh.position.copy(oldPos);
+        c.mesh.rotation.y = oldRot;
+        levelGroup.add(c.mesh);
+        if (c.hasKnife) attachCompanionKnife(c.mesh);
+      }
+    }
+  },
+  undefined,
+  (err) => console.warn('[gltf] Soldier load failed; staying procedural', err)
+);
+
+// ---- Feminine reskin attached to GLTF bones ----
+function attachFeminineReskin(bones, palette) {
+  const skin   = new THREE.MeshLambertMaterial({ color: palette.skinColor });
+  const dress  = new THREE.MeshLambertMaterial({ color: palette.dressColor });
+  const hair   = new THREE.MeshLambertMaterial({ color: palette.hairColor });
+  const shoe   = new THREE.MeshLambertMaterial({ color: 0x202024 });
+  const eyeWh  = new THREE.MeshBasicMaterial({ color: 0xffffff });
+  const pupil  = new THREE.MeshBasicMaterial({ color: 0x2a1f1a });
+  const lipMat = new THREE.MeshBasicMaterial({ color: 0xc44a5a });
+  const blush  = new THREE.MeshBasicMaterial({ color: 0xf2a8b0, transparent: true, opacity: 0.55 });
+
+  // ---- Hips: pelvis + flared skirt ----
+  if (bones.hips) {
+    const pelvis = new THREE.Mesh(new THREE.CylinderGeometry(0.13, 0.15, 0.18, 14), dress);
+    pelvis.position.y = -0.04;
+    bones.hips.add(pelvis);
+    // Skirt cone — wide end downward (cone default points +Y, flip with rotation)
+    const skirt = new THREE.Mesh(
+      new THREE.ConeGeometry(0.30, 0.45, 18, 1, true),
+      new THREE.MeshLambertMaterial({ color: palette.dressColor, side: THREE.DoubleSide })
+    );
+    skirt.rotation.x = Math.PI;
+    skirt.position.y = -0.22;
+    bones.hips.add(skirt);
+  }
+  // ---- Spine: torso + bust ----
+  const spineBone = bones.spine2 || bones.spine1 || bones.spine;
+  if (spineBone) {
+    const torso = new THREE.Mesh(new THREE.CapsuleGeometry(0.16, 0.18, 6, 12), dress);
+    torso.position.y = 0.08;
+    torso.scale.set(1.0, 1.0, 0.78);
+    spineBone.add(torso);
+    const bustG = new THREE.SphereGeometry(0.06, 12, 10);
+    const lBust = new THREE.Mesh(bustG, dress); lBust.position.set(-0.06, 0.10, -0.10);
+    const rBust = new THREE.Mesh(bustG, dress); rBust.position.set( 0.06, 0.10, -0.10);
+    lBust.scale.set(1, 0.7, 0.85); rBust.scale.set(1, 0.7, 0.85);
+    spineBone.add(lBust); spineBone.add(rBust);
+  }
+  // ---- Neck ----
+  if (bones.neck) {
+    const neck = new THREE.Mesh(new THREE.CylinderGeometry(0.05, 0.06, 0.10, 10), skin);
+    neck.position.y = 0.05;
+    bones.neck.add(neck);
+  }
+  // ---- Head: skull + hair + ponytail + face ----
+  if (bones.head) {
+    const head = new THREE.Group();
+    head.position.y = 0.09;
+    bones.head.add(head);
+    const skull = new THREE.Mesh(new THREE.SphereGeometry(0.12, 20, 16), skin);
+    skull.scale.set(1.0, 1.05, 0.95);
+    head.add(skull);
+    // Jaw
+    const jaw = new THREE.Mesh(new THREE.SphereGeometry(0.10, 14, 12), skin);
+    jaw.position.y = -0.05;
+    jaw.scale.set(0.85, 0.65, 0.85);
+    head.add(jaw);
+    // Hair cap (hemisphere)
+    const hairCap = new THREE.Mesh(
+      new THREE.SphereGeometry(0.125, 20, 16, 0, Math.PI*2, 0, Math.PI*0.6), hair
+    );
+    head.add(hairCap);
+    // Long hair behind
+    const longHair = new THREE.Mesh(
+      new THREE.CylinderGeometry(0.13, 0.18, 0.55, 14, 1, true),
+      new THREE.MeshLambertMaterial({ color: palette.hairColor, side: THREE.DoubleSide })
+    );
+    longHair.position.set(0, -0.27, 0.04);
+    head.add(longHair);
+    // Bangs / fringe
+    const fringe = new THREE.Mesh(new THREE.BoxGeometry(0.22, 0.05, 0.04), hair);
+    fringe.position.set(0, 0.07, -0.10);
+    head.add(fringe);
+    // Bow on top
+    const bow = new THREE.Mesh(
+      new THREE.TorusGeometry(0.05, 0.018, 6, 10),
+      new THREE.MeshLambertMaterial({ color: palette.accentColor })
+    );
+    bow.position.set(0, 0.15, 0);
+    bow.rotation.set(Math.PI/2, 0, 0);
+    head.add(bow);
+    // Eyes
+    const eyeG = new THREE.SphereGeometry(0.024, 10, 8);
+    const pupG = new THREE.SphereGeometry(0.013, 8, 6);
+    const lEy = new THREE.Mesh(eyeG, eyeWh); lEy.position.set(-0.04, 0.01, -0.108);
+    const rEy = new THREE.Mesh(eyeG, eyeWh); rEy.position.set( 0.04, 0.01, -0.108);
+    head.add(lEy); head.add(rEy);
+    const lEyeball = new THREE.Group(); lEyeball.position.copy(lEy.position);
+    const rEyeball = new THREE.Group(); rEyeball.position.copy(rEy.position);
+    const lP = new THREE.Mesh(pupG, pupil); lP.position.z = -0.018; lEyeball.add(lP);
+    const rP = new THREE.Mesh(pupG, pupil); rP.position.z = -0.018; rEyeball.add(rP);
+    head.add(lEyeball); head.add(rEyeball);
+    // Eyebrows
+    const browG = new THREE.BoxGeometry(0.05, 0.010, 0.012);
+    const lBrow = new THREE.Mesh(browG, hair); lBrow.position.set(-0.04, 0.05, -0.115);
+    const rBrow = new THREE.Mesh(browG, hair); rBrow.position.set( 0.04, 0.05, -0.115);
+    head.add(lBrow); head.add(rBrow);
+    // Nose
+    const nose = new THREE.Mesh(new THREE.ConeGeometry(0.018, 0.05, 6), skin);
+    nose.rotation.x = -Math.PI/2;
+    nose.position.set(0, -0.005, -0.118);
+    head.add(nose);
+    // Lips
+    const lip = new THREE.Mesh(new THREE.BoxGeometry(0.05, 0.008, 0.012), lipMat);
+    lip.position.set(0, -0.04, -0.118);
+    head.add(lip);
+    // Mouth gap (animates open while talking)
+    const mouth = new THREE.Mesh(
+      new THREE.BoxGeometry(0.038, 0.001, 0.008),
+      new THREE.MeshBasicMaterial({ color: 0x111111 })
+    );
+    mouth.position.set(0, -0.045, -0.115);
+    head.add(mouth);
+    // Cheek blush
+    const blG = new THREE.SphereGeometry(0.024, 8, 6);
+    const lBl = new THREE.Mesh(blG, blush); lBl.position.set(-0.06, -0.02, -0.10); lBl.scale.set(1, 0.5, 0.4); head.add(lBl);
+    const rBl = new THREE.Mesh(blG, blush); rBl.position.set( 0.06, -0.02, -0.10); rBl.scale.set(1, 0.5, 0.4); head.add(rBl);
+
+    // Hooks for tick animation
+    bones.head.userData.face = { mouth, lEyeball, rEyeball };
+  }
+  // ---- Arms: upper sleeve + bare forearm + small hand ----
+  function attachArm(upperKey, foreKey, handKey) {
+    if (bones[upperKey]) {
+      const upper = new THREE.Mesh(new THREE.CapsuleGeometry(0.046, 0.20, 4, 8), dress);
+      upper.position.y = 0.13;
+      bones[upperKey].add(upper);
+    }
+    if (bones[foreKey]) {
+      const fore = new THREE.Mesh(new THREE.CapsuleGeometry(0.040, 0.18, 4, 8), skin);
+      fore.position.y = 0.11;
+      bones[foreKey].add(fore);
+    }
+    if (bones[handKey]) {
+      const hand = new THREE.Mesh(new THREE.SphereGeometry(0.055, 10, 8), skin);
+      hand.scale.set(0.85, 1.4, 0.5);
+      hand.position.y = 0.06;
+      bones[handKey].add(hand);
+    }
+  }
+  attachArm('leftarm',  'leftforearm',  'lefthand');
+  attachArm('rightarm', 'rightforearm', 'righthand');
+  // ---- Legs: bare thigh + calf + boxy shoe ----
+  function attachLeg(upperKey, lowerKey, footKey) {
+    if (bones[upperKey]) {
+      const upper = new THREE.Mesh(new THREE.CapsuleGeometry(0.068, 0.28, 4, 10), skin);
+      upper.position.y = 0.20;
+      bones[upperKey].add(upper);
+    }
+    if (bones[lowerKey]) {
+      const lower = new THREE.Mesh(new THREE.CapsuleGeometry(0.058, 0.26, 4, 10), skin);
+      lower.position.y = 0.18;
+      bones[lowerKey].add(lower);
+    }
+    if (bones[footKey]) {
+      const foot = new THREE.Mesh(new THREE.BoxGeometry(0.10, 0.04, 0.20), shoe);
+      foot.position.set(0, 0.02, 0.06);
+      bones[footKey].add(foot);
+    }
+  }
+  attachLeg('leftupleg',  'leftleg',  'leftfoot');
+  attachLeg('rightupleg', 'rightleg', 'rightfoot');
+}
+
+function buildGLTFGirl(palette, name) {
+  const root = SkeletonUtils.clone(humanProto);
+  // Hide the original Soldier skin so only our feminine reskin shows
+  root.traverse(o => {
+    if (o.isSkinnedMesh || o.isMesh) o.visible = false;
+  });
+  // Index bones by lowercase, prefix-stripped name
+  const bones = {};
+  root.traverse(o => {
+    if (o.isBone) {
+      const key = o.name.replace(/^mixamorig/i, '').toLowerCase();
+      if (!bones[key]) bones[key] = o;
+    }
+  });
+  attachFeminineReskin(bones, palette);
+  // Mixer + Idle/Walk/Run
+  const mixer = new THREE.AnimationMixer(root);
+  let idleAct = null, walkAct = null, runAct = null;
+  for (const clip of humanAnims) {
+    if (/idle/i.test(clip.name))      idleAct = mixer.clipAction(clip);
+    else if (/^run$/i.test(clip.name)) runAct = mixer.clipAction(clip);
+    else if (/walk/i.test(clip.name)) walkAct = mixer.clipAction(clip);
+  }
+  if (idleAct) { idleAct.play(); idleAct.setEffectiveWeight(1); }
+  if (walkAct) { walkAct.play(); walkAct.setEffectiveWeight(0); }
+  if (runAct)  { runAct.play();  runAct.setEffectiveWeight(0); }
+  root.userData.gltf = {
+    mixer, idleAct, walkAct, runAct,
+    headBone: bones.head, righthandBone: bones.righthand,
+    isGLTF: true,
+  };
+  if (name) root.add(makeNameTag(name, palette.dressColor));
+  return root;
+}
 
 function makeNameTag(name, color = 0xffffff) {
   const cv = document.createElement('canvas');
@@ -649,6 +876,10 @@ function buildGLTFCompanion(shirtColor, name) {
 function buildCompanionMesh(palette, _ignored = undefined, name = null) {
   const shirtColor = (palette && palette.dressColor) ?? palette ?? 0x6bb0ff;
   const pantsColor = (palette && palette.accentColor) ?? 0x2a2a3a;
+  // Prefer the GLTF-rigged feminine reskin once Soldier.glb has loaded.
+  if (humanLoaded && palette && palette.dressColor) {
+    return buildGLTFGirl(palette, name);
+  }
   const g = buildProceduralCompanion(shirtColor, pantsColor);
   if (name) g.add(makeNameTag(name, shirtColor));
   return g;
@@ -690,16 +921,74 @@ function buildCompanionKnife() {
 }
 
 function attachCompanionKnife(mesh) {
+  // GLTF girl: attach to the right-hand bone
+  const gltf = mesh.userData.gltf;
+  if (gltf && gltf.righthandBone) {
+    const knife = buildCompanionKnife();
+    knife.position.set(0, 0.06, 0.0);
+    knife.rotation.set(Math.PI / 2, 0, 0);
+    gltf.righthandBone.add(knife);
+    return knife;
+  }
+  // Procedural rig: attach to the right elbow group
   const rig = mesh.userData.rig;
   if (!rig || !rig.rightArm) return null;
   const elbow = rig.rightArm.children.find(o => o.isGroup);
   if (!elbow) return null;
   const knife = buildCompanionKnife();
-  // Hand is at elbow-local (0, -0.40, 0). Anchor knife at hand, blade pointing forward (-Z).
   knife.position.set(0.0, -0.40, 0.05);
-  knife.rotation.set(Math.PI / 2, 0, 0);   // lay flat so blade points forward when arm hangs
+  knife.rotation.set(Math.PI / 2, 0, 0);
   elbow.add(knife);
   return knife;
+}
+
+// Shared knife combat — runs for both GLTF girls (rig=null) and procedural
+// companions. Procedural figures get an explicit elbow swing; GLTF arms are
+// already mixer-driven so we only fade the swing-phase timer.
+function runCompanionKnifeCombat(c, dt, _t, rig) {
+  if (!c.hasKnife) return;
+  let nearest = null, nd = Infinity;
+  for (const e of entities) {
+    const ddx = e.mesh.position.x - c.mesh.position.x;
+    const ddz = e.mesh.position.z - c.mesh.position.z;
+    const d2 = ddx*ddx + ddz*ddz;
+    if (d2 < nd) { nd = d2; nearest = e; }
+  }
+  nd = Math.sqrt(nd);
+  if (nearest && nd < 3.0) {
+    const ax = nearest.mesh.position.x - c.mesh.position.x;
+    const az = nearest.mesh.position.z - c.mesh.position.z;
+    if (nd > 1.0) {
+      c.mesh.position.x += (ax/nd) * 4.5 * dt;
+      c.mesh.position.z += (az/nd) * 4.5 * dt;
+      collide(c.mesh.position, 0.25);
+    }
+    c.mesh.rotation.y = Math.atan2(ax, az);
+    c.attackCooldown = (c.attackCooldown || 0) - dt;
+    if (nd < 1.5 && c.attackCooldown <= 0) {
+      c.swingPhase = 1.0;
+      c.attackCooldown = 0.55 + Math.random() * 0.25;
+      nearest.hp = (nearest.hp ?? 1) - 0.35;
+      blip(220, 0.08, 0.10);
+      if (nearest.hp <= 0) {
+        const idx = entities.indexOf(nearest);
+        if (idx >= 0) entities.splice(idx, 1);
+        if (levelGroup) levelGroup.remove(nearest.mesh);
+        const line = `${c.name} 解决了一个！`;
+        say(line, 3);
+        speak('旁白', line);
+        blip(660, 0.2, 0.15); setTimeout(() => blip(990, 0.25, 0.12), 80);
+      }
+    }
+  }
+  if (rig && c.swingPhase > 0) {
+    const elbowGroup = rig.rightArm.children.find(o => o.isGroup);
+    if (elbowGroup) elbowGroup.rotation.x = -1.2 * Math.sin(c.swingPhase * Math.PI);
+    c.swingPhase = Math.max(0, c.swingPhase - dt * 4);
+    if (c.swingPhase === 0 && elbowGroup) elbowGroup.rotation.x = 0;
+  } else if (c.swingPhase > 0) {
+    c.swingPhase = Math.max(0, c.swingPhase - dt * 4);
+  }
 }
 
 // Shared geometries — one allocation reused across all 100 figures.
@@ -2375,6 +2664,40 @@ function tick() {
     const camDz = c.mesh.position.z - pp.z;
     const camD2 = camDx*camDx + camDz*camDz;
     if (camD2 > 30 * 30) continue;
+    // ---- GLTF-rigged feminine girl: drive mixer + walk/idle blend ----
+    const gltf = c.mesh.userData.gltf;
+    if (gltf) {
+      gltf.mixer.update(dt);
+      const targetWalk = walking ? 1 : 0;
+      c._walkBlend = THREE.MathUtils.lerp(c._walkBlend ?? 0, targetWalk, 0.18);
+      if (gltf.idleAct) gltf.idleAct.setEffectiveWeight(1 - c._walkBlend);
+      if (gltf.walkAct) gltf.walkAct.setEffectiveWeight(c._walkBlend);
+      if (gltf.runAct)  gltf.runAct.setEffectiveWeight(0);
+      // Talking: head bob + mouth open via the bone-attached face hooks
+      if (gltf.headBone) {
+        gltf.headBone.rotation.x = c.talking ? Math.sin(t * 14) * 0.10 : gltf.headBone.rotation.x * 0.9;
+        const face = gltf.headBone.userData.face;
+        if (face) {
+          // Eye tracking
+          const local = c.mesh.worldToLocal(pp.clone());
+          const yaw = THREE.MathUtils.clamp(Math.atan2(local.x, -local.z) * 0.4, -0.35, 0.35);
+          if (face.lEyeball) face.lEyeball.rotation.y = yaw;
+          if (face.rEyeball) face.rEyeball.rotation.y = yaw;
+          // Mouth animation
+          if (face.mouth) {
+            if (c.talking) {
+              const open = 0.5 + Math.abs(Math.sin(t * 18)) * 0.5;
+              face.mouth.scale.y = 1 + open * 6;
+            } else {
+              face.mouth.scale.y += (1 - face.mouth.scale.y) * 0.3;
+            }
+          }
+        }
+      }
+      // Knife combat works on both GLTF and procedural figures
+      runCompanionKnifeCombat(c, dt, t, null);
+      continue;
+    }
     // ---- Feminine procedural rig animation ----
     const rig = c.mesh.userData.rig;
     if (rig) {
@@ -2409,55 +2732,7 @@ function tick() {
         if (rig.lips) rig.lips.scale.y += (1 - rig.lips.scale.y) * 0.3;
       }
 
-      // ---- Knife combat (kills monsters; never targets the player) ----
-      if (c.hasKnife) {
-        let nearest = null, nd = Infinity;
-        for (const e of entities) {
-          const ddx = e.mesh.position.x - c.mesh.position.x;
-          const ddz = e.mesh.position.z - c.mesh.position.z;
-          const d2 = ddx*ddx + ddz*ddz;
-          if (d2 < nd) { nd = d2; nearest = e; }
-        }
-        nd = Math.sqrt(nd);
-        if (nearest && nd < 3.0) {
-          // Break formation toward the entity
-          const ax = nearest.mesh.position.x - c.mesh.position.x;
-          const az = nearest.mesh.position.z - c.mesh.position.z;
-          if (nd > 1.0) {
-            c.mesh.position.x += (ax/nd) * 4.5 * dt;
-            c.mesh.position.z += (az/nd) * 4.5 * dt;
-            collide(c.mesh.position, 0.25);
-          }
-          c.mesh.rotation.y = Math.atan2(ax, az);
-          // Strike when in range
-          c.attackCooldown = (c.attackCooldown || 0) - dt;
-          if (nd < 1.5 && c.attackCooldown <= 0) {
-            c.swingPhase = 1.0;
-            c.attackCooldown = 0.55 + Math.random() * 0.25;
-            nearest.hp = (nearest.hp ?? 1) - 0.35;
-            blip(220, 0.08, 0.10);
-            if (nearest.hp <= 0) {
-              const idx = entities.indexOf(nearest);
-              if (idx >= 0) entities.splice(idx, 1);
-              if (levelGroup) levelGroup.remove(nearest.mesh);
-              const line = `${c.name} 解决了一个！`;
-              say(line, 3);
-              speak('旁白', line);
-              blip(660, 0.2, 0.15); setTimeout(() => blip(990, 0.25, 0.12), 80);
-            }
-          }
-        }
-        // Swing animation: rotate the right elbow forward through one arc
-        if (c.swingPhase > 0) {
-          const elbowGroup = rig.rightArm.children.find(o => o.isGroup);
-          if (elbowGroup) elbowGroup.rotation.x = -1.2 * Math.sin(c.swingPhase * Math.PI);
-          c.swingPhase = Math.max(0, c.swingPhase - dt * 4);
-          if (c.swingPhase === 0) {
-            const elbowGroup = rig.rightArm.children.find(o => o.isGroup);
-            if (elbowGroup) elbowGroup.rotation.x = 0;
-          }
-        }
-      }
+      runCompanionKnifeCombat(c, dt, t, rig);
     }
   }
 
