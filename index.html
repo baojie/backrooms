@@ -175,6 +175,7 @@
 import * as THREE from 'three';
 import { PointerLockControls } from 'three/addons/controls/PointerLockControls.js';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+import { FBXLoader } from 'three/addons/loaders/FBXLoader.js';
 import * as SkeletonUtils from 'three/addons/utils/SkeletonUtils.js';
 
 // Refactored modules
@@ -609,19 +610,36 @@ _gltfLoader.load(
   (err) => console.warn('[gltf] Soldier load failed', err)
 );
 
-// 2) Kira (from three.js webgl_animation_skinning_ik example) — used as
-//    the girl team-member model. Skinned humanoid female with a Run clip.
-_gltfLoader.load(
-  'https://threejs.org/examples/models/gltf/kira.glb',
-  (gltf) => {
-    girlProto = gltf.scene;
-    girlAnims = gltf.animations || [];
-    girlLoaded = true;
-    console.log('[gltf] Kira (girl) animations:', girlAnims.map(a => a.name));
-    scheduleGLTFUpgrade();
+// 2) Capoeira girl FBX (mudroljub/capoeira-girl on GitHub) — skinned
+//    humanoid female model. Pulled via jsDelivr's GitHub CDN for CORS.
+//    Model is in assets/fbx/model.fbx; animation in assets/fbx/Ginga.fbx.
+const _capoeiraBase = 'https://cdn.jsdelivr.net/gh/mudroljub/capoeira-girl@master/assets/fbx/';
+const _fbxLoader = new FBXLoader();
+_fbxLoader.load(
+  _capoeiraBase + 'model.fbx',
+  (model) => {
+    girlProto = model;
+    // Try to load a default animation (Ginga = the basic capoeira sway).
+    _fbxLoader.load(
+      _capoeiraBase + 'Ginga.fbx',
+      (anim) => {
+        girlAnims = anim.animations || [];
+        girlLoaded = true;
+        console.log('[fbx] Capoeira girl + Ginga loaded; clips:', girlAnims.map(a => a.name));
+        scheduleGLTFUpgrade();
+      },
+      undefined,
+      (err) => {
+        // Animation failed — still use the static model.
+        console.warn('[fbx] Ginga animation load failed; girls will be static', err);
+        girlAnims = model.animations || [];
+        girlLoaded = true;
+        scheduleGLTFUpgrade();
+      }
+    );
   },
   undefined,
-  (err) => console.warn('[gltf] Kira load failed; staying procedural', err)
+  (err) => console.warn('[fbx] Capoeira girl model load failed; staying procedural', err)
 );
 
 // ---- Feminine reskin attached to GLTF bones ----
@@ -789,29 +807,31 @@ function attachFeminineReskin(bones, palette) {
 }
 
 function buildGLTFGirl(palette, name) {
-  // Kira (from the three.js webgl_animation_skinning_ik example) — a skinned
-  // humanoid female with at least a "Run" animation clip. Per-instance
-  // material tint with a small hair-bow accent on the head bone.
+  // Capoeira girl FBX (from mudroljub/capoeira-girl). Skinned humanoid
+  // female with a Ginga animation. SkeletonUtils.clone preserves the rig
+  // so each instance can play her own mixer.
   if (!girlLoaded) return null;
   const root = SkeletonUtils.clone(girlProto);
-  // Kira's authoring scale tends to be very large (~100). Compute a bbox
-  // and rescale so she stands ~1.7m tall.
+  // FBX models are usually exported in centimetres — auto-rescale to ~1.7m.
   const bbox = new THREE.Box3().setFromObject(root);
   const h = bbox.max.y - bbox.min.y;
   if (h > 0.001) {
-    const targetH = 1.7;
-    const s = targetH / h;
+    const s = 1.7 / h;
     root.scale.setScalar(s);
-    // After scale, make sure feet sit on y=0 by accounting for any offset.
     const bbox2 = new THREE.Box3().setFromObject(root);
     root.position.y -= bbox2.min.y;
   }
-  // Tint each material toward the dress colour so each girl has her own look
+  // Tint each material toward the dress colour so each girl has her own look.
   const tint = new THREE.Color(palette.dressColor);
   root.traverse(o => {
     if (o.isMesh && o.material) {
-      o.material = o.material.clone();
-      if (o.material.color) o.material.color.lerp(tint, 0.30);
+      const mats = Array.isArray(o.material) ? o.material : [o.material];
+      o.material = mats.map(m => {
+        const cm = m.clone();
+        if (cm.color) cm.color.lerp(tint, 0.25);
+        return cm;
+      });
+      if (o.material.length === 1) o.material = o.material[0];
       o.castShadow = false;
       o.frustumCulled = false;
     }
@@ -831,26 +851,21 @@ function buildGLTFGirl(palette, name) {
     bow.scale.set(0.9, 0.9, 0.55);
     headBone.add(bow);
   }
-  // Animation mixer — Kira commonly ships with a single "Run" clip; reuse
-  // it for all motion states (weight ramps in scheduleGLTFUpgrade tick).
+  // Animation mixer — the capoeira pack ships per-move clips. Use the first
+  // available clip as the active loop (we loaded Ginga at startup).
   const mixer = new THREE.AnimationMixer(root);
   let idleAct = null, walkAct = null, runAct = null;
   for (const clip of girlAnims) {
-    if (/idle/i.test(clip.name))         idleAct = mixer.clipAction(clip);
-    else if (/walk/i.test(clip.name))     walkAct = mixer.clipAction(clip);
-    else if (/run/i.test(clip.name))      runAct  = mixer.clipAction(clip);
+    if (/idle|ginga/i.test(clip.name))    idleAct = mixer.clipAction(clip);
+    else if (/walk/i.test(clip.name))      walkAct = mixer.clipAction(clip);
+    else if (/run/i.test(clip.name))       runAct  = mixer.clipAction(clip);
   }
-  // If we only have one clip, use it as the walk loop.
-  if (!walkAct && runAct) walkAct = runAct;
-  if (!idleAct && walkAct) idleAct = walkAct;
-  if (idleAct) { idleAct.play(); idleAct.setEffectiveWeight(idleAct === walkAct ? 0 : 1); }
+  if (!idleAct && girlAnims.length) idleAct = mixer.clipAction(girlAnims[0]);
+  if (!walkAct) walkAct = idleAct;
+  if (idleAct) { idleAct.play(); idleAct.setEffectiveWeight(1); }
   if (walkAct && walkAct !== idleAct) { walkAct.play(); walkAct.setEffectiveWeight(0); }
   if (runAct && runAct !== walkAct && runAct !== idleAct) { runAct.play(); runAct.setEffectiveWeight(0); }
-  root.userData.gltf = {
-    mixer, idleAct, walkAct, runAct,
-    headBone,
-    isGLTF: true,
-  };
+  root.userData.gltf = { mixer, idleAct, walkAct, runAct, headBone, isGLTF: true };
   if (name) root.add(makeNameTag(name, palette.dressColor));
   return root;
 }
