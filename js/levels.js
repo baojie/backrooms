@@ -4,7 +4,7 @@
 export const CELL = 4;
 export const GRID = 27;
 export const WALL_HEIGHT = 3.0;
-export const TEAM_SIZE = 100;
+export const TEAM_SIZE = 10;
 
 export const LEVELS = [
   { name:'黄色房间',   wallRGB:[212,187,96],  floorRGB:[110,70,35],  ceilRGB:[180,170,140],
