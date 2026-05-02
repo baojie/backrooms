@@ -577,29 +577,50 @@ const WEAPONS = {
 const WEAPON_ORDER = ['pistol', 'ak47', 'knife', 'rocket'];
 
 // ============================================================
-// Web-resourced humanoid model (Soldier.glb from Three.js examples)
+// Web-resourced humanoid models (Three.js examples GLBs)
+//   Soldier.glb         → male NPCs (the hostile entities)
+//   RobotExpressive.glb → girl team members (tinted pink + bow)
 // ============================================================
+// Legacy aliases — kept so older code paths still work.
 let humanProto = null;
 let humanAnims = null;
 let humanLoaded = false;
 
-// Re-enabled: load Soldier.glb once, hide its mesh, and attach feminine
-// procedural parts to its bones. Each companion gets the skeleton + Idle/Walk
-// animations from the GLTF, but the look is our own — solving the "Soldier
-// looks ugly" complaint while keeping animation quality.
+let soldierProto = null, soldierAnims = null, soldierLoaded = false;
+let girlProto = null,    girlAnims = null,    girlLoaded = false;
+
 const _gltfLoader = new GLTFLoader();
+// 1) Soldier — used as the male/entity model.
 _gltfLoader.load(
   'https://threejs.org/examples/models/gltf/Soldier.glb',
   (gltf) => {
+    soldierProto = gltf.scene;
+    soldierAnims = gltf.animations || [];
+    soldierLoaded = true;
+    // Keep legacy globals pointing at Soldier so any unrelated code
+    // (e.g. the older feminine-reskin path) doesn't break.
     humanProto = gltf.scene;
     humanAnims = gltf.animations || [];
     humanLoaded = true;
-    console.log('[gltf] Soldier loaded — animations:', humanAnims.map(a => a.name));
-    // Spread the 100× SkeletonUtils.clone cost over many frames.
+    console.log('[gltf] Soldier (male NPC) animations:', soldierAnims.map(a => a.name));
+    upgradeEntitiesToGLTF();
+  },
+  undefined,
+  (err) => console.warn('[gltf] Soldier load failed', err)
+);
+
+// 2) RobotExpressive — used as the girl team-member model.
+_gltfLoader.load(
+  'https://threejs.org/examples/models/gltf/RobotExpressive/RobotExpressive.glb',
+  (gltf) => {
+    girlProto = gltf.scene;
+    girlAnims = gltf.animations || [];
+    girlLoaded = true;
+    console.log('[gltf] RobotExpressive (girl) animations:', girlAnims.map(a => a.name));
     scheduleGLTFUpgrade();
   },
   undefined,
-  (err) => console.warn('[gltf] Soldier load failed; staying procedural', err)
+  (err) => console.warn('[gltf] RobotExpressive load failed; staying procedural', err)
 );
 
 // ---- Feminine reskin attached to GLTF bones ----
@@ -767,38 +788,116 @@ function attachFeminineReskin(bones, palette) {
 }
 
 function buildGLTFGirl(palette, name) {
-  const root = SkeletonUtils.clone(humanProto);
-  // Hide the original Soldier skin so only our feminine reskin shows
+  // Use RobotExpressive for the team. It's a friendly cartoon humanoid
+  // with rich animations; we tint it with the companion's dress colour
+  // and add a hair-bow accent so it reads "girl team-member" at a glance.
+  if (!girlLoaded) return null;
+  const root = SkeletonUtils.clone(girlProto);
+  root.scale.set(0.55, 0.55, 0.55); // RobotExpressive is ~1.6m at scale 1
+  // Tint each material toward the dress colour
+  const tint = new THREE.Color(palette.dressColor);
+  const accent = new THREE.Color(palette.accentColor);
   root.traverse(o => {
-    if (o.isSkinnedMesh || o.isMesh) o.visible = false;
-  });
-  // Index bones by lowercase, prefix-stripped name
-  const bones = {};
-  root.traverse(o => {
-    if (o.isBone) {
-      const key = o.name.replace(/^mixamorig/i, '').toLowerCase();
-      if (!bones[key]) bones[key] = o;
+    if (o.isMesh && o.material) {
+      o.material = o.material.clone();
+      if (o.material.color) o.material.color.lerp(tint, 0.55);
+      if (o.material.emissive) o.material.emissive.lerp(accent, 0.3);
+      o.castShadow = false;
+      o.frustumCulled = false;
     }
   });
-  attachFeminineReskin(bones, palette);
-  // Mixer + Idle/Walk/Run
+  // Find the head bone for talking head-bob and bow attach
+  let headBone = null;
+  root.traverse(o => {
+    if (o.isBone && /head/i.test(o.name) && !headBone) headBone = o;
+  });
+  if (headBone) {
+    const bow = new THREE.Mesh(
+      new THREE.TorusGeometry(0.10, 0.030, 8, 14),
+      new THREE.MeshLambertMaterial({ color: palette.accentColor })
+    );
+    bow.position.set(0.10, 0.20, -0.04);
+    bow.rotation.x = Math.PI / 2;
+    bow.scale.set(0.9, 0.9, 0.55);
+    headBone.add(bow);
+  }
+  // Animation mixer — RobotExpressive has Idle, Walking, Running, Wave, Yes, No, etc.
   const mixer = new THREE.AnimationMixer(root);
   let idleAct = null, walkAct = null, runAct = null;
-  for (const clip of humanAnims) {
-    if (/idle/i.test(clip.name))      idleAct = mixer.clipAction(clip);
-    else if (/^run$/i.test(clip.name)) runAct = mixer.clipAction(clip);
-    else if (/walk/i.test(clip.name)) walkAct = mixer.clipAction(clip);
+  for (const clip of girlAnims) {
+    if (/^idle$/i.test(clip.name))     idleAct = mixer.clipAction(clip);
+    else if (/walking/i.test(clip.name)) walkAct = mixer.clipAction(clip);
+    else if (/running/i.test(clip.name)) runAct  = mixer.clipAction(clip);
   }
   if (idleAct) { idleAct.play(); idleAct.setEffectiveWeight(1); }
   if (walkAct) { walkAct.play(); walkAct.setEffectiveWeight(0); }
   if (runAct)  { runAct.play();  runAct.setEffectiveWeight(0); }
   root.userData.gltf = {
     mixer, idleAct, walkAct, runAct,
-    headBone: bones.head, righthandBone: bones.righthand,
+    headBone,
     isGLTF: true,
   };
   if (name) root.add(makeNameTag(name, palette.dressColor));
   return root;
+}
+
+// Soldier.glb-based hostile entity. Tinted dim-red/grey and ramped to the
+// Run animation so the figure reads as a malevolent male NPC rushing you.
+function buildSoldierEntity() {
+  if (!soldierLoaded) return null;
+  const root = SkeletonUtils.clone(soldierProto);
+  // Dark menacing tint
+  const tint = new THREE.Color(0x8a1414);
+  root.traverse(o => {
+    if (o.isMesh && o.material) {
+      o.material = o.material.clone();
+      if (o.material.color) o.material.color.lerp(tint, 0.45);
+      if (o.material.emissive) o.material.emissive.set(0x200000);
+      o.castShadow = false;
+      o.frustumCulled = false;
+    }
+  });
+  // Glowing red eyes — small spheres added near the head bone
+  let headBone = null;
+  root.traverse(o => {
+    if (o.isBone && /head/i.test(o.name) && !headBone) headBone = o;
+  });
+  if (headBone) {
+    const eyeMat = new THREE.MeshBasicMaterial({ color: 0xff2a2a });
+    const eyeG = new THREE.SphereGeometry(0.025, 8, 6);
+    const lE = new THREE.Mesh(eyeG, eyeMat); lE.position.set(-0.05, 0.05, -0.10);
+    const rE = new THREE.Mesh(eyeG, eyeMat); rE.position.set( 0.05, 0.05, -0.10);
+    headBone.add(lE); headBone.add(rE);
+  }
+  const mixer = new THREE.AnimationMixer(root);
+  let idleAct = null, walkAct = null, runAct = null;
+  for (const clip of soldierAnims) {
+    if (/idle/i.test(clip.name))       idleAct = mixer.clipAction(clip);
+    else if (/^run$/i.test(clip.name))  runAct  = mixer.clipAction(clip);
+    else if (/walk/i.test(clip.name))   walkAct = mixer.clipAction(clip);
+  }
+  if (idleAct) { idleAct.play(); idleAct.setEffectiveWeight(0.0); }
+  if (walkAct) { walkAct.play(); walkAct.setEffectiveWeight(0.0); }
+  if (runAct)  { runAct.play();  runAct.setEffectiveWeight(1.0); }
+  root.userData.gltf = { mixer, idleAct, walkAct, runAct, headBone, isGLTF: true };
+  return root;
+}
+
+// Lazily swap procedural entities with Soldier clones once the GLTF resolves.
+function upgradeEntitiesToGLTF() {
+  if (!soldierLoaded || !levelGroup) return;
+  for (const e of entities) {
+    if (!e.mesh || e.mesh.userData.gltf) continue;
+    const newMesh = buildSoldierEntity();
+    if (!newMesh) return;
+    const oldPos = e.mesh.position.clone();
+    const oldRot = e.mesh.rotation.y;
+    levelGroup.remove(e.mesh);
+    newMesh.position.copy(oldPos);
+    newMesh.rotation.y = oldRot;
+    levelGroup.add(newMesh);
+    e.mesh = newMesh;
+  }
 }
 
 function makeNameTag(name, color = 0xffffff) {
@@ -1854,7 +1953,9 @@ function buildLevel(n, opts = {}) {
   // Fallback to all open cells if the maze is small or fully clustered.
   const entitySpawnPool = farEnough.length ? farEnough : openCells;
   for (let i = 0; i < numEntities; i++) {
-    const eg = buildHumanoidEntity();
+    // Prefer the Soldier.glb male NPC; fall back to the procedural figure
+    // until the GLTF resolves (it's lazily upgraded later).
+    const eg = (soldierLoaded && buildSoldierEntity()) || buildHumanoidEntity();
     const ec = entitySpawnPool[Math.floor(Math.random()*entitySpawnPool.length)];
     eg.position.set((ec[0]-GRID/2)*CELL, 0, (ec[1]-GRID/2)*CELL);
     levelGroup.add(eg);
@@ -1899,6 +2000,7 @@ function buildLevel(n, opts = {}) {
   showFloorTitle(n + 1, cfg.name);
   // Kick off background GLTF upgrade for all alive companions on this floor.
   scheduleGLTFUpgrade();
+  upgradeEntitiesToGLTF();
 }
 
 // Lazy GLTF upgrade: swap a few companions per frame from procedural to
@@ -1907,9 +2009,9 @@ function buildLevel(n, opts = {}) {
 let _gltfUpgradeIdx = 0;
 function scheduleGLTFUpgrade() {
   _gltfUpgradeIdx = 0;
-  if (!humanLoaded) return;
+  if (!girlLoaded) return;
   function step() {
-    if (!humanLoaded || !levelGroup) return;
+    if (!girlLoaded || !levelGroup) return;
     const budget = 3;   // upgrade up to 3 figures per frame
     let done = 0;
     while (_gltfUpgradeIdx < companions.length && done < budget) {
@@ -1917,8 +2019,10 @@ function scheduleGLTFUpgrade() {
       if (c && c.alive && c.mesh && !c.mesh.userData.gltf) {
         const oldPos = c.mesh.position.clone();
         const oldRot = c.mesh.rotation.y;
+        const newMesh = buildGLTFGirl(c, c.name);
+        if (!newMesh) continue;
         levelGroup.remove(c.mesh);
-        c.mesh = buildGLTFGirl(c, c.name);
+        c.mesh = newMesh;
         c.mesh.position.copy(oldPos);
         c.mesh.rotation.y = oldRot;
         levelGroup.add(c.mesh);
@@ -2980,6 +3084,13 @@ function tick() {
       }
     }
     e.mesh.lookAt(pp.x, e.mesh.position.y, pp.z);
+
+    // Soldier GLTF: just tick the animation mixer
+    const eg = e.mesh.userData.gltf;
+    if (eg) {
+      eg.mixer.update(dt);
+      continue;
+    }
 
     // Shambling rig animation — skip for far figures to save cost
     const rig = e.mesh.userData.rig;
