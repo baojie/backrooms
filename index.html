@@ -595,19 +595,8 @@ _gltfLoader.load(
     humanAnims = gltf.animations || [];
     humanLoaded = true;
     console.log('[gltf] Soldier loaded — animations:', humanAnims.map(a => a.name));
-    // Swap any existing procedural placeholders with the rigged feminine version
-    for (const c of companions) {
-      if (c.alive && c.mesh && !c.mesh.userData.gltf && levelGroup) {
-        const oldPos = c.mesh.position.clone();
-        const oldRot = c.mesh.rotation.y;
-        levelGroup.remove(c.mesh);
-        c.mesh = buildCompanionMesh(c, undefined, c.name);
-        c.mesh.position.copy(oldPos);
-        c.mesh.rotation.y = oldRot;
-        levelGroup.add(c.mesh);
-        if (c.hasKnife) attachCompanionKnife(c.mesh);
-      }
-    }
+    // Spread the 100× SkeletonUtils.clone cost over many frames.
+    scheduleGLTFUpgrade();
   },
   undefined,
   (err) => console.warn('[gltf] Soldier load failed; staying procedural', err)
@@ -876,10 +865,9 @@ function buildGLTFCompanion(shirtColor, name) {
 function buildCompanionMesh(palette, _ignored = undefined, name = null) {
   const shirtColor = (palette && palette.dressColor) ?? palette ?? 0x6bb0ff;
   const pantsColor = (palette && palette.accentColor) ?? 0x2a2a3a;
-  // Prefer the GLTF-rigged feminine reskin once Soldier.glb has loaded.
-  if (humanLoaded && palette && palette.dressColor) {
-    return buildGLTFGirl(palette, name);
-  }
+  // Always build the cheap procedural figure here so level transitions stay
+  // fast (no 100× SkeletonUtils.clone synchronously). The GLTF reskin gets
+  // applied lazily after the fade-in by `scheduleGLTFUpgrade()`.
   const g = buildProceduralCompanion(shirtColor, pantsColor);
   if (name) g.add(makeNameTag(name, shirtColor));
   return g;
@@ -1567,6 +1555,14 @@ function buildLevel(n, opts = {}) {
 
   buildMaze();
 
+  // Some levels are a single open space, not a maze. Clear all interior
+  // cells so only the outer border remains as walls.
+  if (cfg.openSpace || cfg.props === 'cars') {
+    for (let x = 1; x < GRID-1; x++)
+      for (let z = 1; z < GRID-1; z++)
+        cells[x][z].wall = false;
+  }
+
   const wallTex   = makeNoiseTexture(128, cfg.wallRGB, 32, 2);
   const floorTex  = makeNoiseTexture(128, cfg.floorRGB, 50, GRID);
   const ceilTex   = makeNoiseTexture(128, cfg.ceilRGB, 25, GRID);
@@ -1876,7 +1872,8 @@ function buildLevel(n, opts = {}) {
     const pz = elevator.pos.z + out.z * 1.0;
     controls.getObject().position.set(px, 1.7, pz);
     player.lastPos.set(px, 1.7, pz);
-    // Look outward
+    // Reset any residual camera tilt from death/lying-down so the view is upright.
+    camera.rotation.set(0, 0, 0);
     if ('lookAt' in camera) {
       camera.lookAt(elevator.pos.x + out.x * 4, 1.7, elevator.pos.z + out.z * 4);
     }
@@ -1884,8 +1881,14 @@ function buildLevel(n, opts = {}) {
       if (!c.alive || !c.mesh) continue;
       c.mesh.position.set(px - out.x * 0.6, 0, pz - out.z * 0.6);
     }
-    elevator.doorOpen = 0; // start with doors closed; will animate open
+    elevator.doorOpen = 0;
     scene.userData.spawnedAtElevator = true;
+  } else if (opts.spawnAtElevator && !elevator) {
+    // No elevator was placed on this floor — fall back to the central spawn
+    // so we don't leave the player stuck at a stale position.
+    controls.getObject().position.set(spawnX, 1.7, spawnZ);
+    player.lastPos.set(spawnX, 1.7, spawnZ);
+    camera.rotation.set(0, 0, 0);
   }
 
   // Start upright with full health — no dead-on-floor intro.
@@ -1894,6 +1897,38 @@ function buildLevel(n, opts = {}) {
   player.hasWokenUp = true;
 
   showFloorTitle(n + 1, cfg.name);
+  // Kick off background GLTF upgrade for all alive companions on this floor.
+  scheduleGLTFUpgrade();
+}
+
+// Lazy GLTF upgrade: swap a few companions per frame from procedural to
+// rigged feminine GLTF figures. Spreads the heavy SkeletonUtils.clone cost
+// across many frames so level transitions never freeze the screen.
+let _gltfUpgradeIdx = 0;
+function scheduleGLTFUpgrade() {
+  _gltfUpgradeIdx = 0;
+  if (!humanLoaded) return;
+  function step() {
+    if (!humanLoaded || !levelGroup) return;
+    const budget = 3;   // upgrade up to 3 figures per frame
+    let done = 0;
+    while (_gltfUpgradeIdx < companions.length && done < budget) {
+      const c = companions[_gltfUpgradeIdx++];
+      if (c && c.alive && c.mesh && !c.mesh.userData.gltf) {
+        const oldPos = c.mesh.position.clone();
+        const oldRot = c.mesh.rotation.y;
+        levelGroup.remove(c.mesh);
+        c.mesh = buildGLTFGirl(c, c.name);
+        c.mesh.position.copy(oldPos);
+        c.mesh.rotation.y = oldRot;
+        levelGroup.add(c.mesh);
+        if (c.hasKnife) attachCompanionKnife(c.mesh);
+        done++;
+      }
+    }
+    if (_gltfUpgradeIdx < companions.length) requestAnimationFrame(step);
+  }
+  requestAnimationFrame(step);
 }
 
 function spawnProps(cfg, openCells) {
@@ -1909,15 +1944,134 @@ function spawnProps(cfg, openCells) {
 
   switch (cfg.props) {
     case 'cars': {
-      for (const [cx, cz] of pick(8)) {
-        const wx = (cx-GRID/2)*CELL, wz = (cz-GRID/2)*CELL;
-        const car = new THREE.Mesh(
-          new THREE.BoxGeometry(2.0, 1.0, 1.0),
-          new THREE.MeshLambertMaterial({ color: 0x223344 + Math.floor(Math.random()*0x303030) })
-        );
-        car.position.set(wx, 0.5, wz);
-        car.rotation.y = Math.random()*Math.PI*2;
-        levelGroup.add(car);
+      // Open garage: rows of parked cars, support pillars, painted bay-line markers.
+      const limit = (GRID/2) * CELL - 4;        // stay clear of outer walls
+      const rowZs = [-14, -6, 6, 14];           // four parking rows
+      const carBodyPalette = [0x1f2c44, 0x6b1f1f, 0x303236, 0xa0982a, 0x3a3a3a, 0x4a5a45, 0x6a4828, 0x202028];
+
+      function buildCarMesh(bodyColor) {
+        const g = new THREE.Group();
+        const bodyMat = new THREE.MeshLambertMaterial({ color: bodyColor });
+        const cabinMat = new THREE.MeshLambertMaterial({ color: bodyColor });
+        const glassMat = new THREE.MeshBasicMaterial({ color: 0x152030, transparent: true, opacity: 0.65 });
+        const tireMat = new THREE.MeshLambertMaterial({ color: 0x101010 });
+        const rimMat  = new THREE.MeshLambertMaterial({ color: 0x888888 });
+        // Body
+        const body = new THREE.Mesh(new THREE.BoxGeometry(1.85, 0.55, 4.0), bodyMat);
+        body.position.y = 0.62;
+        g.add(body);
+        // Cabin (greenhouse)
+        const cabin = new THREE.Mesh(new THREE.BoxGeometry(1.72, 0.55, 2.0), cabinMat);
+        cabin.position.set(0, 1.10, 0.10);
+        g.add(cabin);
+        // Windshield + rear window
+        const wsh = new THREE.Mesh(new THREE.BoxGeometry(1.65, 0.50, 0.05), glassMat);
+        wsh.position.set(0, 1.10, -0.92);
+        g.add(wsh);
+        const rwh = new THREE.Mesh(new THREE.BoxGeometry(1.65, 0.50, 0.05), glassMat);
+        rwh.position.set(0, 1.10, 1.12);
+        g.add(rwh);
+        // Side windows
+        const swg = new THREE.BoxGeometry(0.05, 0.45, 1.95);
+        const lW = new THREE.Mesh(swg, glassMat); lW.position.set(-0.86, 1.12, 0.10);
+        const rW = new THREE.Mesh(swg, glassMat); rW.position.set( 0.86, 1.12, 0.10);
+        g.add(lW); g.add(rW);
+        // Wheels (cylinders rotated to roll along Z direction of the car)
+        const wheelG = new THREE.CylinderGeometry(0.34, 0.34, 0.20, 16);
+        const rimG   = new THREE.CylinderGeometry(0.18, 0.18, 0.21, 12);
+        for (const [dx, dz] of [[-0.85,-1.40],[0.85,-1.40],[-0.85,1.40],[0.85,1.40]]) {
+          const tire = new THREE.Mesh(wheelG, tireMat);
+          tire.rotation.z = Math.PI / 2;
+          tire.position.set(dx, 0.34, dz);
+          g.add(tire);
+          const rim = new THREE.Mesh(rimG, rimMat);
+          rim.rotation.z = Math.PI / 2;
+          rim.position.set(dx, 0.34, dz);
+          g.add(rim);
+        }
+        // Headlights / taillights
+        const hlG = new THREE.SphereGeometry(0.10, 8, 8);
+        const hlM = new THREE.MeshBasicMaterial({ color: 0xfff2cc });
+        const tlM = new THREE.MeshBasicMaterial({ color: 0x661a1a });
+        const lh = new THREE.Mesh(hlG, hlM); lh.scale.set(1, 0.6, 1); lh.position.set(-0.62, 0.65, -1.98); g.add(lh);
+        const rh = new THREE.Mesh(hlG, hlM); rh.scale.set(1, 0.6, 1); rh.position.set( 0.62, 0.65, -1.98); g.add(rh);
+        const lt = new THREE.Mesh(hlG, tlM); lt.scale.set(1, 0.5, 1); lt.position.set(-0.62, 0.65,  1.98); g.add(lt);
+        const rt = new THREE.Mesh(hlG, tlM); rt.scale.set(1, 0.5, 1); rt.position.set( 0.62, 0.65,  1.98); g.add(rt);
+        // Plate strip
+        const plate = new THREE.Mesh(new THREE.BoxGeometry(0.45, 0.10, 0.02),
+          new THREE.MeshBasicMaterial({ color: 0xeeddaa }));
+        plate.position.set(0, 0.45, -2.01);
+        g.add(plate);
+        return g;
+      }
+
+      // Painted bay-line strips (under the cars, between rows)
+      const lineMat = new THREE.MeshBasicMaterial({ color: 0xfff2a0 });
+      const bayLineGeom = new THREE.PlaneGeometry(0.10, 4.2);
+      for (const z of rowZs) {
+        for (let bx = -limit + 1.25; bx <= limit + 0.5; bx += 2.5) {
+          const line = new THREE.Mesh(bayLineGeom, lineMat);
+          line.rotation.x = -Math.PI / 2;
+          line.position.set(bx, 0.02, z);
+          levelGroup.add(line);
+        }
+      }
+      // Aisle direction arrows (subtle)
+      const arrowGeom = new THREE.PlaneGeometry(1.4, 0.4);
+      for (let z = -10; z <= 10; z += 4) {
+        const a = new THREE.Mesh(arrowGeom, lineMat);
+        a.rotation.x = -Math.PI / 2;
+        a.position.set(0, 0.025, z);
+        a.material = lineMat;
+        levelGroup.add(a);
+      }
+
+      // Cars in each row
+      for (let ri = 0; ri < rowZs.length; ri++) {
+        const z = rowZs[ri];
+        const facing = (ri % 2 === 0) ? 0 : Math.PI;  // alternate rows face opposite
+        // Player spawn is roughly at (0, 0). Don't park on top of them.
+        for (let bx = -limit + 1.25; bx <= limit - 1.25; bx += 2.5) {
+          if (Math.abs(bx) < 4 && Math.abs(z) < 8) continue;  // keep aisle near spawn clear
+          if (Math.random() < 0.18) continue;                // some empty bays
+          const color = carBodyPalette[Math.floor(Math.random()*carBodyPalette.length)];
+          const car = buildCarMesh(color);
+          car.position.set(bx, 0, z);
+          car.rotation.y = facing + (Math.random() - 0.5) * 0.04; // slight misalignment
+          levelGroup.add(car);
+          // Axis-aligned collision box (cars are ~1.85 × 4.0; rotated 0 or π → same axes)
+          wallBoxes.push({ x: bx, z, halfX: 0.95, halfZ: 2.05 });
+        }
+      }
+
+      // Concrete support pillars on a sparse grid for that parking-garage feel
+      const pillarMat = new THREE.MeshLambertMaterial({ color: 0x9a8e7a });
+      const pillarGeom = new THREE.BoxGeometry(0.8, WALL_HEIGHT, 0.8);
+      for (let px = -16; px <= 16; px += 8) {
+        for (let pz = -18; pz <= 18; pz += 10) {
+          // Don't drop pillars right where cars are parked
+          if (rowZs.some(rz => Math.abs(pz - rz) < 1.5)) continue;
+          const p = new THREE.Mesh(pillarGeom, pillarMat);
+          p.position.set(px, WALL_HEIGHT/2, pz);
+          levelGroup.add(p);
+          // Painted yellow base around pillar
+          const base = new THREE.Mesh(
+            new THREE.BoxGeometry(1.0, 0.05, 1.0),
+            new THREE.MeshBasicMaterial({ color: 0xc9a020 })
+          );
+          base.position.set(px, 0.025, pz);
+          levelGroup.add(base);
+          wallBoxes.push({ x: px, z: pz, half: 0.45 });
+        }
+      }
+
+      // Oil stains scattered on the floor
+      const oilMat = new THREE.MeshBasicMaterial({ color: 0x101012 });
+      for (let i = 0; i < 18; i++) {
+        const oil = new THREE.Mesh(new THREE.CircleGeometry(0.4 + Math.random()*0.6, 8), oilMat);
+        oil.rotation.x = -Math.PI / 2;
+        oil.position.set((Math.random()-0.5) * (limit*1.6), 0.015, (Math.random()-0.5) * (limit*1.6));
+        levelGroup.add(oil);
       }
       break;
     }
@@ -2484,10 +2638,11 @@ function resetAll() {
 // ============================================================
 function collide(pos, radius=0.35) {
   for (const w of wallBoxes) {
+    const hx = w.halfX ?? w.half, hz = w.halfZ ?? w.half;
     const dx = pos.x - w.x, dz = pos.z - w.z;
-    if (Math.abs(dx) < w.half + radius && Math.abs(dz) < w.half + radius) {
-      const px = (w.half + radius) - Math.abs(dx);
-      const pz = (w.half + radius) - Math.abs(dz);
+    if (Math.abs(dx) < hx + radius && Math.abs(dz) < hz + radius) {
+      const px = (hx + radius) - Math.abs(dx);
+      const pz = (hz + radius) - Math.abs(dz);
       if (px < pz) pos.x += Math.sign(dx) * px;
       else         pos.z += Math.sign(dz) * pz;
     }
@@ -2805,8 +2960,9 @@ function tick() {
     const next = e.mesh.position.clone().addScaledVector(v, e.speed * dt);
     let blocked = false;
     for (const w of wallBoxes) {
+      const hx = w.halfX ?? w.half, hz = w.halfZ ?? w.half;
       const dx = next.x - w.x, dz = next.z - w.z;
-      if (Math.abs(dx) < w.half + 0.4 && Math.abs(dz) < w.half + 0.4) { blocked = true; break; }
+      if (Math.abs(dx) < hx + 0.4 && Math.abs(dz) < hz + 0.4) { blocked = true; break; }
     }
     let moved = false;
     if (!blocked) { e.mesh.position.copy(next); moved = true; }
@@ -2816,8 +2972,9 @@ function tick() {
         const n2 = e.mesh.position.clone().addScaledVector(dd, e.speed * dt);
         let b2 = false;
         for (const w of wallBoxes) {
+          const hx2 = w.halfX ?? w.half, hz2 = w.halfZ ?? w.half;
           const dx = n2.x - w.x, dz = n2.z - w.z;
-          if (Math.abs(dx) < w.half + 0.4 && Math.abs(dz) < w.half + 0.4) { b2 = true; break; }
+          if (Math.abs(dx) < hx2 + 0.4 && Math.abs(dz) < hz2 + 0.4) { b2 = true; break; }
         }
         if (!b2) { e.mesh.position.copy(n2); moved = true; break; }
       }
@@ -3017,21 +3174,29 @@ function tick() {
         say(`电梯运行中…… → ${LEVELS[T.target].name}`, 1.5);
       }
     } else if (T.phase === 'rebuild') {
-      // Wait briefly inside the dark, then build new level
-      if (T.t > 1.0) {
-        buildLevel(T.target, { spawnAtElevator: true });
+      if (T.t > 0.5) {
+        try {
+          buildLevel(T.target, { spawnAtElevator: true });
+        } catch (err) {
+          console.error('[elevator] buildLevel failed', err);
+          // Even on error, force the screen back so the player isn't stuck on black.
+        }
         T.phase = 'fadein'; T.t = 0;
       }
     } else if (T.phase === 'fadein') {
       flashEl.style.opacity = String(Math.max(0, 1 - T.t / 0.5));
-      if (T.t > 0.5) { T.phase = 'opening'; T.t = 0; blip(660, 0.3, 0.18); }
+      if (T.t > 0.5) {
+        flashEl.style.opacity = '0';
+        T.phase = 'opening'; T.t = 0;
+        blip(660, 0.3, 0.18);
+      }
     } else if (T.phase === 'opening') {
       const a = Math.min(T.t / 0.9, 1);
       if (elevator) elevator.doorOpen = a;
       if (T.t > 1.0) {
         flashEl.style.opacity = '0';
         elevatorTransition = null;
-        controls.lock();
+        try { controls.lock(); } catch {}
       }
     }
   }
