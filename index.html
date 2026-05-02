@@ -177,31 +177,23 @@ import { PointerLockControls } from 'three/addons/controls/PointerLockControls.j
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import * as SkeletonUtils from 'three/addons/utils/SkeletonUtils.js';
 
-// ============================================================
-// Floor / Level definitions
-// ============================================================
-const LEVELS = [
-  { name:'黄色房间',   wallRGB:[212,187,96],  floorRGB:[110,70,35],  ceilRGB:[180,170,140],
-    ambient:0x665533, lightHex:0xfff0b8, fogHex:0x1a1505, fogNear:4,  fogFar:28, hasCeiling:true },
-  { name:'车库',       wallRGB:[120,120,124], floorRGB:[70,70,72],   ceilRGB:[90,90,92],
-    ambient:0x484850, lightHex:0xc4c8b0, fogHex:0x202024, fogNear:3,  fogFar:24, hasCeiling:true, props:'cars' },
-  { name:'发电厂',     wallRGB:[80,80,86],    floorRGB:[60,55,50],   ceilRGB:[55,55,60],
-    ambient:0x303040, lightHex:0xb0d8ff, fogHex:0x10141c, fogNear:2,  fogFar:22, hasCeiling:true, props:'sparks' },
-  { name:'游泳池',     wallRGB:[200,220,235], floorRGB:[100,180,220], ceilRGB:[230,235,245],
-    ambient:0x6088a0, lightHex:0xeaffff, fogHex:0xa6d8e8, fogNear:6,  fogFar:32, hasCeiling:true, props:'water' },
-  { name:'农场',       wallRGB:[140,108,70],  floorRGB:[80,140,60],   ceilRGB:[120,170,220],
-    ambient:0x88aacc, lightHex:0xffeec4, fogHex:0xb6cde0, fogNear:8,  fogFar:40, hasCeiling:false, props:'crops' },
-  { name:'幼儿园',     wallRGB:[245,200,205], floorRGB:[200,160,180], ceilRGB:[255,240,220],
-    ambient:0xa07880, lightHex:0xffd0d0, fogHex:0x402030, fogNear:3,  fogFar:20, hasCeiling:true, props:'toys' },
-  { name:'办公室',     wallRGB:[210,200,180], floorRGB:[80,90,100],   ceilRGB:[230,230,225],
-    ambient:0x707070, lightHex:0xffffff, fogHex:0x303030, fogNear:4,  fogFar:26, hasCeiling:true, props:'cubicles' },
-  { name:'图书馆',     wallRGB:[120,80,40],   floorRGB:[60,40,25],    ceilRGB:[80,55,35],
-    ambient:0x3a2a18, lightHex:0xffd080, fogHex:0x1c1208, fogNear:3,  fogFar:22, hasCeiling:true, props:'shelves' },
-  { name:'地铁站',     wallRGB:[90,90,95],    floorRGB:[40,40,45],    ceilRGB:[60,60,65],
-    ambient:0x303038, lightHex:0xffe080, fogHex:0x101014, fogNear:2,  fogFar:18, hasCeiling:true, props:'rails' },
-  { name:'终焉',       wallRGB:[10,10,10],    floorRGB:[10,10,12],    ceilRGB:[10,10,10],
-    ambient:0x000000, lightHex:0xffffff, fogHex:0x000000, fogNear:1,  fogFar:14, hasCeiling:false, props:'void' },
-];
+// Refactored modules
+import { LEVELS, CELL, GRID, WALL_HEIGHT, TEAM_SIZE, GIRL_NAMES } from './js/levels.js';
+import { makeNoiseTexture } from './js/textures.js';
+import {
+  initAudio, blip, playStatic, heartbeat,
+  playDeathCry as _playDeathCry,
+  getAudioCtx, getHumGain, getLastHeart, setLastHeart,
+} from './js/audio.js';
+import {
+  say, speak, whispers, setCompanions as _setCompanionsForTTS, tickSubtitle, getSubTimer,
+} from './js/tts.js';
+import { pickCompanionLine, COMPANION_LINES_GENERIC } from './js/lines.js';
+
+// Bridge: audio's death cry needs the TTS speak callback
+function playDeathCry(c) { _playDeathCry(c, speak); }
+addEventListener('click', initAudio, { once: true });
+
 
 // ============================================================
 // Setup
@@ -233,37 +225,15 @@ flashlight.target.position.set(0, 0, -1);
 camera.add(flashlight);
 camera.add(flashlight.target);
 
-// ============================================================
-// Procedural noise textures
-// ============================================================
-function makeNoiseTexture(size, base, variance, scale = 1) {
-  const c = document.createElement('canvas');
-  c.width = c.height = size;
-  const ctx = c.getContext('2d');
-  const img = ctx.createImageData(size, size);
-  for (let i = 0; i < size * size; i++) {
-    const n = (Math.random() - 0.5) * variance;
-    img.data[i*4]   = Math.max(0, Math.min(255, base[0] + n));
-    img.data[i*4+1] = Math.max(0, Math.min(255, base[1] + n * 0.9));
-    img.data[i*4+2] = Math.max(0, Math.min(255, base[2] + n * 0.7));
-    img.data[i*4+3] = 255;
-  }
-  ctx.putImageData(img, 0, 0);
-  const tex = new THREE.CanvasTexture(c);
-  tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
-  tex.repeat.set(scale, scale);
-  return tex;
-}
 
 // ============================================================
 // Level state
 // ============================================================
-const CELL = 4;
-const GRID = 27;
-const WALL_HEIGHT = 3.0;
 
 let levelGroup = null;
 let wallBoxes = [];
+let wallMeshRef = null;       // current level's instanced wall mesh
+let rockets = [];             // active rocket projectiles
 let lights = [];
 let almonds = [];
 let knives = [];
@@ -284,6 +254,7 @@ const player = {
   almondsCollected: 0,
   hasKnife: true,           // always equipped — selectable in weapon menu
   knifeSwing: 0,
+  dying: 0,                 // 0..1 death animation progress
   gunRecoil: 0,
   shotsFired: 0,
   kills: { entities: 0, companions: 0 },
@@ -300,19 +271,6 @@ function setWeapon(name) {
   say(t, 1.5);
 }
 
-const TEAM_SIZE = 100;
-const GIRL_NAMES = [
-  '小美','小雅','小静','小婷','小敏','小芳','小蕾','小晴','小琳','小洁',
-  '小妍','小薇','小欣','小怡','小娜','小柔','小慧','小颖','小燕','小媛',
-  '小雪','小月','小星','小霞','小云','小梦','小蓝','小紫','小红','小绿',
-  '小桃','小樱','小莉','小荷','小兰','小菊','小梅','小竹','小桐','小棠',
-  '小诗','小雨','小风','小语','小笑','小歌','小舞','小琴','小棋','小书',
-  '小茜','小璐','小瑶','小婕','小彤','小宁','小璇','小娴','小蓓','小娇',
-  '小盈','小妮','小娟','小淑','小馨','小琪','小芸','小柳','小杏','小桦',
-  '小素','小净','小恬','小怜','小翠','小玲','小依','小可','小宛','小冉',
-  '小灵','小忆','小蔓','小淼','小漫','小漪','小波','小晗','小晨','小昕',
-  '小烁','小妙','小巧','小若','小忻','小绮','小悦','小翘','小麦','小糖',
-];
 function pickName(i) {
   return GIRL_NAMES[i % GIRL_NAMES.length] +
          (i >= GIRL_NAMES.length ? String(Math.floor(i / GIRL_NAMES.length) + 1) : '');
@@ -342,6 +300,8 @@ const companions = Array.from({ length: TEAM_SIZE }, (_, i) => {
     swingPhase: 0,
   };
 });
+// Register the companion roster with the TTS module so it can mark `talking`.
+_setCompanionsForTTS(companions);
 
 function buildKnifeMesh() {
   const g = new THREE.Group();
@@ -523,6 +483,69 @@ heldAKPivot.rotation.set(0, -0.04, 0);
 heldAKPivot.visible = false;
 camera.add(heldAKPivot);
 
+// Rocket launcher (火箭炮) — fires explosive rockets that destroy walls.
+function buildRocketLauncherMesh() {
+  const g = new THREE.Group();
+  const tubeMat = new THREE.MeshLambertMaterial({ color: 0x3a3a3a });
+  const dark    = new THREE.MeshLambertMaterial({ color: 0x111111 });
+  const wood    = new THREE.MeshLambertMaterial({ color: 0x5a3220 });
+  const accent  = new THREE.MeshBasicMaterial({ color: 0xff6644 });
+
+  // Main launch tube — long cylinder
+  const tube = new THREE.Mesh(new THREE.CylinderGeometry(0.075, 0.075, 0.95, 14), tubeMat);
+  tube.rotation.x = Math.PI / 2;
+  tube.position.set(0, 0.04, -0.30);
+  g.add(tube);
+  // Rear venturi (flares back)
+  const venturi = new THREE.Mesh(new THREE.CylinderGeometry(0.12, 0.075, 0.10, 14), dark);
+  venturi.rotation.x = Math.PI / 2;
+  venturi.position.set(0, 0.04, 0.22);
+  g.add(venturi);
+  // Front muzzle
+  const muzzle = new THREE.Mesh(new THREE.CylinderGeometry(0.085, 0.075, 0.05, 14), dark);
+  muzzle.rotation.x = Math.PI / 2;
+  muzzle.position.set(0, 0.04, -0.78);
+  g.add(muzzle);
+  // Top sight rail
+  const rail = new THREE.Mesh(new THREE.BoxGeometry(0.04, 0.02, 0.5), dark);
+  rail.position.set(0, 0.13, -0.30);
+  g.add(rail);
+  // Front sight post
+  const sight = new THREE.Mesh(new THREE.BoxGeometry(0.01, 0.05, 0.02), dark);
+  sight.position.set(0, 0.17, -0.60);
+  g.add(sight);
+  // Pistol grip
+  const grip = new THREE.Mesh(new THREE.BoxGeometry(0.05, 0.18, 0.07), wood);
+  grip.position.set(0, -0.08, -0.10);
+  grip.rotation.x = -0.20;
+  g.add(grip);
+  // Trigger guard
+  const tg = new THREE.Mesh(new THREE.TorusGeometry(0.030, 0.006, 6, 12, Math.PI), dark);
+  tg.position.set(0, -0.025, -0.10);
+  tg.rotation.set(-Math.PI/2, 0, Math.PI);
+  g.add(tg);
+  // Warhead visible at the front (red tip — looks "loaded")
+  const head = new THREE.Mesh(new THREE.ConeGeometry(0.062, 0.13, 12), accent);
+  head.rotation.x = -Math.PI / 2;
+  head.position.set(0, 0.04, -0.70);
+  g.add(head);
+  // Muzzle flash sphere (hidden)
+  const flashMat = new THREE.MeshBasicMaterial({ color: 0xffe080, transparent: true, opacity: 0 });
+  const flash = new THREE.Mesh(new THREE.SphereGeometry(0.18, 10, 8), flashMat);
+  flash.position.set(0, 0.04, -0.85);
+  g.add(flash);
+  g.userData.flash = flash;
+  g.userData.warhead = head;
+  return g;
+}
+const heldRocketPivot = new THREE.Group();
+const heldRocket = buildRocketLauncherMesh();
+heldRocketPivot.add(heldRocket);
+heldRocketPivot.position.set(0.30, -0.30, -0.55);
+heldRocketPivot.rotation.set(0, -0.04, 0);
+heldRocketPivot.visible = false;
+camera.add(heldRocketPivot);
+
 const WEAPONS = {
   pistol: {
     name: '手枪 Pistol',  kind: 'gun',
@@ -543,8 +566,15 @@ const WEAPONS = {
     pivot: heldKnifePivot, held: heldKnife,
     cooldown: 0.35, auto: false,
   },
+  rocket: {
+    name: '火箭炮 Rocket', kind: 'rocket',
+    pivot: heldRocketPivot, held: heldRocket,
+    cooldown: 1.4, auto: false,
+    recoilKick: 1.6, flashScreen: 0.45,
+    blastRadius: 5.0, blastDamage: 5.0,
+  },
 };
-const WEAPON_ORDER = ['pistol', 'ak47', 'knife'];
+const WEAPON_ORDER = ['pistol', 'ak47', 'knife', 'rocket'];
 
 // ============================================================
 // Web-resourced humanoid model (Soldier.glb from Three.js examples)
@@ -624,16 +654,50 @@ function buildCompanionMesh(palette, _ignored = undefined, name = null) {
   return g;
 }
 
-// Attach a small knife to the companion's right hand.
+// Bright, simple knife used by companions. Made visible from a distance
+// (chunkier blade, emissive sheen) so the team's "armed" status is obvious.
+function buildCompanionKnife() {
+  const g = new THREE.Group();
+  const blade = new THREE.Mesh(
+    new THREE.BoxGeometry(0.06, 0.55, 0.02),
+    new THREE.MeshLambertMaterial({ color: 0xeef2ff, emissive: 0x445566, emissiveIntensity: 0.6 })
+  );
+  blade.position.y = -0.27;
+  g.add(blade);
+  // Tip
+  const tip = new THREE.Mesh(
+    new THREE.ConeGeometry(0.04, 0.10, 4),
+    blade.material
+  );
+  tip.position.y = -0.60;
+  tip.rotation.z = Math.PI;
+  g.add(tip);
+  // Cross-guard
+  const guard = new THREE.Mesh(
+    new THREE.BoxGeometry(0.16, 0.04, 0.04),
+    new THREE.MeshLambertMaterial({ color: 0x222222 })
+  );
+  guard.position.y = 0.02;
+  g.add(guard);
+  // Handle
+  const grip = new THREE.Mesh(
+    new THREE.CylinderGeometry(0.025, 0.025, 0.16, 8),
+    new THREE.MeshLambertMaterial({ color: 0x4a2a14 })
+  );
+  grip.position.y = 0.10;
+  g.add(grip);
+  return g;
+}
+
 function attachCompanionKnife(mesh) {
   const rig = mesh.userData.rig;
   if (!rig || !rig.rightArm) return null;
   const elbow = rig.rightArm.children.find(o => o.isGroup);
   if (!elbow) return null;
-  const knife = buildKnifeMesh();
-  knife.scale.set(0.55, 0.55, 0.55);
-  knife.rotation.set(0, 0, -Math.PI / 2);
-  knife.position.set(0, -0.42, 0.04);
+  const knife = buildCompanionKnife();
+  // Hand is at elbow-local (0, -0.40, 0). Anchor knife at hand, blade pointing forward (-Z).
+  knife.position.set(0.0, -0.40, 0.05);
+  knife.rotation.set(Math.PI / 2, 0, 0);   // lay flat so blade points forward when arm hangs
   elbow.add(knife);
   return knife;
 }
@@ -1198,6 +1262,8 @@ function disposeLevel() {
   });
   levelGroup = null;
   wallBoxes = []; lights = []; almonds = []; knives = []; entities = []; stairExit = null; elevator = null;
+  wallMeshRef = null;
+  rockets = [];
 }
 
 function buildLevel(n, opts = {}) {
@@ -1233,12 +1299,15 @@ function buildLevel(n, opts = {}) {
         const wx = (x - GRID/2) * CELL, wz = (z - GRID/2) * CELL;
         dummy.position.set(wx, WALL_HEIGHT/2, wz);
         dummy.updateMatrix();
-        wallMesh.setMatrixAt(idx++, dummy.matrix);
-        wallBoxes.push({ x: wx, z: wz, half: CELL/2 });
+        wallMesh.setMatrixAt(idx, dummy.matrix);
+        // Track instance index so the rocket can hide individual blocks.
+        wallBoxes.push({ x: wx, z: wz, half: CELL/2, instanceIdx: idx });
+        idx++;
       }
     }
   }
   levelGroup.add(wallMesh);
+  wallMeshRef = wallMesh;          // global handle for destroyWallsAt()
 
   const planeGeom = new THREE.PlaneGeometry(GRID*CELL, GRID*CELL);
   const floor = new THREE.Mesh(planeGeom, floorMat);
@@ -1489,9 +1558,19 @@ function buildLevel(n, opts = {}) {
   spawnProps(cfg, openCells);
 
   const numEntities = 1 + Math.floor(n / 3);
+  // Entities must spawn far from the player so the game doesn't start
+  // with one chewing on you. Require at least ~14m straight-line distance.
+  const MIN_ENTITY_DIST_SQ = 14 * 14;
+  const farEnough = openCells.filter(([cx, cz]) => {
+    const wx = (cx - GRID/2) * CELL, wz = (cz - GRID/2) * CELL;
+    const ddx = wx - spawnX, ddz = wz - spawnZ;
+    return (ddx*ddx + ddz*ddz) >= MIN_ENTITY_DIST_SQ;
+  });
+  // Fallback to all open cells if the maze is small or fully clustered.
+  const entitySpawnPool = farEnough.length ? farEnough : openCells;
   for (let i = 0; i < numEntities; i++) {
     const eg = buildHumanoidEntity();
-    const ec = openCells[Math.floor(Math.random()*openCells.length)];
+    const ec = entitySpawnPool[Math.floor(Math.random()*entitySpawnPool.length)];
     eg.position.set((ec[0]-GRID/2)*CELL, 0, (ec[1]-GRID/2)*CELL);
     levelGroup.add(eg);
     entities.push({
@@ -1519,6 +1598,11 @@ function buildLevel(n, opts = {}) {
     elevator.doorOpen = 0; // start with doors closed; will animate open
     scene.userData.spawnedAtElevator = true;
   }
+
+  // Start upright with full health — no dead-on-floor intro.
+  player.lyingDown = false;
+  player.standingUp = null;
+  player.hasWokenUp = true;
 
   showFloorTitle(n + 1, cfg.name);
 }
@@ -1671,586 +1755,6 @@ function showFloorTitle(n, name) {
 }
 
 // ============================================================
-// Audio
-// ============================================================
-let audioCtx, hum, humGain;
-function initAudio() {
-  if (audioCtx) return;
-  audioCtx = new (window.AudioContext || window.webkitAudioContext)();
-  hum = audioCtx.createOscillator();
-  hum.type = 'sawtooth';
-  hum.frequency.value = 60;
-  humGain = audioCtx.createGain();
-  humGain.gain.value = 0.04;
-  const f = audioCtx.createBiquadFilter();
-  f.type = 'lowpass'; f.frequency.value = 400;
-  hum.connect(f).connect(humGain).connect(audioCtx.destination);
-  hum.start();
-}
-addEventListener('click', initAudio, { once: true });
-
-function blip(freq, dur=0.2, vol=0.15) {
-  if (!audioCtx) return;
-  const t = audioCtx.currentTime;
-  const o = audioCtx.createOscillator();
-  o.frequency.setValueAtTime(freq, t);
-  const g = audioCtx.createGain();
-  g.gain.setValueAtTime(vol, t);
-  g.gain.exponentialRampToValueAtTime(0.001, t+dur);
-  o.connect(g).connect(audioCtx.destination);
-  o.start(); o.stop(t+dur);
-}
-
-function playStatic() {
-  if (!audioCtx) return;
-  const buf = audioCtx.createBuffer(1, audioCtx.sampleRate*0.15, audioCtx.sampleRate);
-  const d = buf.getChannelData(0);
-  for (let i = 0; i < d.length; i++) d[i] = (Math.random()*2-1)*0.4;
-  const s = audioCtx.createBufferSource();
-  s.buffer = buf;
-  const g = audioCtx.createGain(); g.gain.value = 0.3;
-  s.connect(g).connect(audioCtx.destination);
-  s.start();
-}
-
-let lastHeart = 0;
-function heartbeat() {
-  if (!audioCtx) return;
-  const now = audioCtx.currentTime;
-  const o = audioCtx.createOscillator();
-  o.frequency.value = 55;
-  const g = audioCtx.createGain();
-  g.gain.setValueAtTime(0, now);
-  g.gain.linearRampToValueAtTime(0.6 * (1 - player.sanity), now + 0.02);
-  g.gain.exponentialRampToValueAtTime(0.001, now + 0.25);
-  o.connect(g).connect(audioCtx.destination);
-  o.start(now); o.stop(now + 0.3);
-}
-
-// ============================================================
-// Subtitles + TTS
-// ============================================================
-const subEl = document.getElementById('subtitle');
-let subTimer = 0;
-function say(text, duration = 4) {
-  subEl.textContent = text;
-  subEl.style.opacity = '1';
-  subTimer = duration;
-}
-
-// ---------- TTS: Piper server (preferred) → Web Speech API (fallback) ----------
-const PIPER_URL = 'http://127.0.0.1:8001';
-let piperOK = null;          // null = unknown, true/false after probe
-let currentTTSAudio = null;  // currently playing piper Audio element
-
-(async function probePiper() {
-  try {
-    const r = await fetch(PIPER_URL + '/health', { method: 'GET' });
-    piperOK = r.ok;
-  } catch { piperOK = false; }
-  console.log('[tts] piper available:', piperOK);
-})();
-
-let zhVoices = [];
-function isMandarinVoice(v) {
-  const lang = (v.lang || '').toLowerCase();
-  const name = (v.name || '').toLowerCase();
-  // Reject Cantonese + other Chinese variants explicitly
-  if (lang.startsWith('zh-hk') || lang.startsWith('zh-yue') || lang.startsWith('yue')
-      || /cantonese|hakka|min nan|wu/.test(name)) return false;
-  // Accept Mandarin: zh-CN, zh-TW (Taiwanese Mandarin), cmn-*, zh, or names that say Mandarin
-  return lang === 'zh' || lang.startsWith('zh-cn') || lang.startsWith('zh-tw')
-      || lang.startsWith('zh-cmn') || lang.startsWith('cmn')
-      || /mandarin|普通话|国语|汉语|chinese.*mandarin/i.test(name);
-}
-function refreshVoices() {
-  if (!('speechSynthesis' in window)) return;
-  const all = window.speechSynthesis.getVoices();
-  zhVoices = all.filter(isMandarinVoice);
-  if (zhVoices.length) {
-    console.log('[tts] mandarin voices:', zhVoices.map(v => `${v.name} (${v.lang})`));
-  } else {
-    console.log('[tts] no mandarin voices installed — Web Speech disabled');
-  }
-}
-if ('speechSynthesis' in window) {
-  refreshVoices();
-  window.speechSynthesis.onvoiceschanged = refreshVoices;
-}
-function pickVoice(speakerName) {
-  if (!zhVoices.length) return null;
-  let h = 0; for (const ch of speakerName) h = (h*31 + ch.charCodeAt(0)) & 0xffff;
-  return zhVoices[h % zhVoices.length];
-}
-
-const SPEAKER_KEY = { '小王': 'xiaowang', '小李': 'xiaoli', '旁白': 'narrator' };
-
-function speakWebSpeech(speakerName, text, opts) {
-  if (!('speechSynthesis' in window)) return;
-  // Strict Mandarin: never speak if no Mandarin voice is available.
-  const voice = pickVoice(speakerName);
-  if (!voice || !isMandarinVoice(voice)) return;
-  const c = companions.find(x => x.name === speakerName);
-  if (c) c.talking = true;
-  const u = new SpeechSynthesisUtterance(text);
-  u.lang = 'zh-CN';
-  u.voice = voice;
-  u.rate = opts.rate ?? 1.0;
-  u.pitch = opts.pitch ?? 1.0;
-  if (speakerName === '旁白') { u.pitch = 0.7;  u.rate = 0.9; }
-  else {
-    // Per-character pitch from a stable hash so each of the 100 girls sounds distinct
-    let h = 0; for (const ch of speakerName) h = (h*31 + ch.charCodeAt(0)) & 0xff;
-    u.pitch = 0.95 + (h / 255) * 0.5;     // 0.95 .. 1.45
-    u.rate  = 0.95 + ((h * 7) & 0xff) / 255 * 0.2; // 0.95 .. 1.15
-  }
-  u.onend = () => { if (c) c.talking = false; };
-  u.onerror = () => { if (c) c.talking = false; };
-  window.speechSynthesis.cancel();
-  window.speechSynthesis.speak(u);
-}
-
-function speak(speakerName, line, opts = {}) {
-  // Strip "小王：「...」" prefix
-  const m = line.match(/「(.+)」/);
-  const text = m ? m[1] : line;
-  const c = companions.find(x => x.name === speakerName);
-
-  // Try Piper if available
-  if (piperOK) {
-    if (c) c.talking = true;
-    if (currentTTSAudio) { try { currentTTSAudio.pause(); } catch {} currentTTSAudio = null; }
-    const speaker = SPEAKER_KEY[speakerName] || 'default';
-    const url = `${PIPER_URL}/tts?speaker=${speaker}&text=${encodeURIComponent(text)}`;
-    const a = new Audio(url);
-    currentTTSAudio = a;
-    a.addEventListener('ended', () => { if (c) c.talking = false; if (currentTTSAudio === a) currentTTSAudio = null; });
-    a.addEventListener('error', () => {
-      // Server died mid-session — fall back for this and subsequent lines
-      piperOK = false;
-      if (c) c.talking = false;
-      currentTTSAudio = null;
-      speakWebSpeech(speakerName, text, opts);
-    });
-    a.play().catch(() => {
-      piperOK = false;
-      if (c) c.talking = false;
-      speakWebSpeech(speakerName, text, opts);
-    });
-    return;
-  }
-
-  // Fallback: Web Speech API
-  speakWebSpeech(speakerName, text, opts);
-}
-
-const whispers = [
-  '……你不该来这里……',
-  '……这些墙不对劲……',
-  '……别停下……',
-  '……不要回头……',
-  '……它知道你的名字……',
-  '……我也曾是活人……',
-  '……出口在更深处……',
-];
-
-// ============================================================
-// Conversation library — combinatorial templates produce 1000+
-// unique Chinese lines split across speakers, floors and contexts.
-// ============================================================
-function expand(...parts) {
-  if (parts.length === 0) return [''];
-  const [first, ...rest] = parts;
-  const tail = expand(...rest);
-  const out = [];
-  for (const a of first) for (const r of tail) out.push(a + r);
-  return out;
-}
-function fromTemplates(templates) {
-  const out = [];
-  for (const t of templates) for (const s of expand(...t)) out.push(s);
-  return out;
-}
-
-// ---------- 小王 (steady, observant) ----------
-const LINES_XW_GENERIC = fromTemplates([
-  [['', '说真的，', '我跟你说，', '老实讲，'],
-   ['这里', '这地方', '这一片', '这层楼'],
-   ['不对劲。', '让人发毛。', '让我心慌。', '太安静了。', '气氛不对。']],
-  [['我们', '咱们'], ['得', '该', '必须'],
-   ['加快', '快走', '提速', '走快'], ['点。', '一些。', '别拖。']],
-  [['跟紧', '别拉开', '靠近'], ['一点', '一些'],
-   ['，别走散。', '，怕走丢。', '，我看不清你。']],
-  [['', '我'], ['好像', '总觉得', '隐约'],
-   ['听见', '听到'], ['什么声响。', '有动静。', '墙里面有东西。', '脚步声。']],
-  [['这', '这迷宫', '这地图'], ['好像在', '一直在', '不停地'],
-   ['变。', '变形。', '换样子。', '骗我们。']],
-  [['', '注意，'], ['前面', '右边', '左边', '拐角'],
-   ['好像有', '可能有', '别管', '小心'], ['东西。', '动静。', '影子。']],
-  [['撑住。', '别慌。', '深呼吸。', '冷静。'],
-   ['', '我也', '一会儿就'], ['', '没事。', '会过去的。']],
-  [['节省', '留点'], ['体力。', '力气。', '杏仁水。']],
-  [['这', '这种'], ['噪音', '嗡鸣', '寂静'],
-   ['让我', '挺'], ['不舒服。', '难受。', '想吐。']],
-  [['手电', '电池'], ['', '可'],
-   ['别', '不能'], ['用太久。', '随便点。', '浪费。']],
-  [['你', '我们', '咱'], ['别', '不要'],
-   ['停下。', '回头。', '看身后。', '碰那东西。']],
-  [['它', '那东西'], ['', '可能'],
-   ['没', '还没'], ['看见我们。', '听见。', '注意到。']],
-  [['我数到三，', '准备好，', '听我口令，', '看准了，'],
-   ['', '我们'], ['', '一起'], ['冲过去。', '跑。', '走。']],
-  [['这盏灯', '那盏灯', '前面那灯'], ['坏了。', '快灭了。', '在闪。', '不太对。']],
-  [['再坚持', '撑过去', '熬过'], ['一会儿。', '这一段。', '这层。']],
-  [['我会保护你的。', '别怕，有我在。', '我先走，你跟上。',
-    '我打头，你殿后。', '别让我看不见你。']],
-  [['脚下', '前方', '右手边', '左手边'],
-   ['有', '小心'], ['坑。', '台阶。', '碎玻璃。', '杂物。', '水洼。']],
-  [['', '深一点呼吸。'], ['别紧张。', '稳住。', '握紧拳头。']],
-  [['', '说不定'], ['出口', '楼梯', '电梯'],
-   ['就在', '可能在'], ['前面。', '附近。', '下个拐弯。']],
-  [['', '我先去', '让我'], ['探一下', '看看', '试试'], ['。', '路。']],
-  [['你脸色不好。', '你还好吗？', '你冷吗？',
-    '你的手在抖。', '你眼神不对。', '需要休息吗？']],
-]);
-
-const LINES_XW_FEAR = fromTemplates([
-  [['', '糟了，'], ['它', '那东西', '声音'],
-   ['', '正在', '已经'], ['靠近了。', '盯上我们了。', '在追。', '在身后。']],
-  [['快', '别犹豫', '现在', '马上'],
-   ['！', '走！', '跑！', '跟上！']],
-  [['别', '千万别'], ['出声', '说话', '吵', '大喘气', '回头'],
-   ['！', '。']],
-  [['它在', '声音在', '气味在'],
-   ['左边。', '右边。', '后面。', '上面。', '下面。']],
-  [['绕开它。', '别正面冲。', '换路。', '从这边走。', '别走直线。']],
-]);
-
-const LINES_XW_SAFE = fromTemplates([
-  [['暂时', '这一段', '这一会儿', '现在'],
-   ['安全。', '没事了。', '可以喘口气。']],
-  [['好像', '似乎', '看起来'],
-   ['没事了。', '它走了。', '没跟上来。', '甩掉它了。']],
-  [['深呼吸。', '坐一下。', '靠这墙歇一下。',
-    '检查一下你的伤。', '把杏仁水喝了。']],
-]);
-
-const LINES_XW_ITEM = fromTemplates([
-  [['你拿到杏仁水了，', '喝完那瓶，', '吃完了，'],
-   ['', '感觉'], ['好点了吗？', '清醒了吗？', '能跑吗？']],
-  [['我给你看着，', '我先不喝，'],
-   ['你', '你先'], ['喝。', '补一下。']],
-  [['这瓶', '那瓶'], ['看起来', '闻起来'],
-   ['还行。', '有点怪。', '过期了吧。', '能喝。']],
-]);
-
-// ---------- 小李 (anxious, expressive) ----------
-const LINES_XL_GENERIC = fromTemplates([
-  [['', '我跟你说，', '哎，'],
-   ['我害怕。', '我好怕。', '我撑不住了。', '我想哭。', '我腿软了。']],
-  [['这', '这种'], ['味道', '气味', '声音'],
-   ['好', '太'], ['熟悉了。', '陌生了。', '难闻了。', '可怕了。']],
-  [['这是', '咱们到'], ['第几层', '哪一层'],
-   ['了？', '了啊？']],
-  [['会', '能'], ['出去', '回家', '醒过来'],
-   ['吧？', '吗？', '的吧？']],
-  [['你', '哥', '老王'], ['', '别'],
-   ['离我太远。', '走那么快。', '不说话啊。', '一个人去。']],
-  [['我', '俺'], ['脚', '腿', '胳膊', '心脏', '胃'],
-   ['有点', '很', '一直在'],
-   ['酸。', '抖。', '跳得快。', '难受。', '没力气。']],
-  [['这', '那'], ['灯', '声响', '影子', '风'],
-   ['真讨厌。', '吓死我了。', '让我起鸡皮疙瘩。', '不太对。']],
-  [['我妈', '我女朋友', '我家狗', '我同事'],
-   ['', '应该'], ['正在', '会'],
-   ['找我吧。', '担心我。', '哭。', '报警了吧。']],
-  [['', '不知道为什么，'],
-   ['我', '我刚刚'], ['想起', '梦见'],
-   ['小时候。', '一只猫。', '一首歌。', '加班的事。']],
-  [['你', '我们'], ['看', '听', '闻'],
-   ['到了吗？', '到那个了？', '了那玩意？']],
-  [['好饿。', '好困。', '好渴。', '我想睡。', '我想吐。', '我头好晕。']],
-  [['', '说真的，'], ['我', '咱'],
-   ['不该来这里。', '怎么混到这地步。', '是不是死了。', '是不是疯了。']],
-  [['这', '这墙', '这地毯', '这天花板'],
-   ['', '在'], ['动。', '呼吸。', '说话。', '看着我。']],
-  [['我们能不能', '我能不能', '哥能不能'],
-   ['', '稍微'], ['停一下。', '歇歇。', '抱一下。', '坐下。']],
-  [['真的有', '真的会有'],
-   ['楼梯', '电梯', '出口', '终点'],
-   ['吗？', '吧？']],
-  [['我手机没信号。', '我表停了。', '我手电不亮。',
-    '我钱包不见了。', '我不知道时间了。']],
-  [['为什么', '凭什么'],
-   ['是', '偏偏是'], ['我们。', '我。', '咱俩。']],
-  [['你', '哥'], ['头发', '脸色', '眼神'],
-   ['', '都'], ['不对了。', '变了。', '吓我。']],
-  [['', '说真的，'], ['这一层', '上一层'],
-   ['', '比刚才'], ['更糟。', '更安静。', '更冷。', '更暗。']],
-  [['', '哎，'], ['你', '你刚才'],
-   ['说什么了？', '听见我说话吗？', '看到我了吗？']],
-  [['等等我！', '别走那么快！', '我跟不上！', '哥别丢下我！', '我求你了！']],
-]);
-
-const LINES_XL_FEAR = fromTemplates([
-  [['它来了！', '它过来了！', '它看见我们了！',
-    '它要抓我了！', '别让它碰我！']],
-  [['救命！', '救我！', '哥救我！', '别走！', '快！']],
-  [['完了完了……', '糟了糟了……', '不行了不行了……',
-    '我不行了……', '我跑不动了……']],
-  [['它在', '那东西在'],
-   ['后面！', '上面！', '右边！', '左边！', '里面！']],
-  [['对不起，', '抱歉，', '我错了，'],
-   ['我', '我刚刚'], ['', '差点'], ['停下了。', '走错了。', '丢了东西。']],
-]);
-
-const LINES_XL_SAFE = fromTemplates([
-  [['总算', '终于', '幸好'],
-   ['过去了。', '安全了。', '甩掉了。']],
-  [['我心都', '我手都', '我腿都'],
-   ['', '还在'], ['抖。', '软。', '不听使唤。']],
-  [['', '哥，'], ['谢谢你。', '辛苦了。', '没你我早完了。']],
-]);
-
-const LINES_XL_ITEM = fromTemplates([
-  [['', '哥，'], ['杏仁水', '这水', '这瓶'],
-   ['', '真'], ['救命。', '管用。', '甜。', '好喝。']],
-  [['我', '咱'], ['再找几瓶。', '多拿点。', '存着。']],
-  [['你也', '你先'], ['喝点。', '补一下。', '尝尝。']],
-]);
-
-// ---------- Floor-specific lines ----------
-const _floorTemplates = {
-  0: { // 黄色房间
-    xw: [
-      [['这', '这种'], ['黄色', '壁纸', '日光灯'],
-       ['', '让我'], ['看吐了。', '头晕。', '睡不着。', '想起出租屋。']],
-      [['地毯', '潮气', '空气'], ['', '很'],
-       ['湿。', '霉。', '臭。', '黏。']],
-      [['这电', '这灯'], ['一直', '总是'],
-       ['闪。', '嗡嗡响。', '让我心烦。']],
-    ],
-    xl: [
-      [['好黄。', '黄到我恶心。', '怎么全是黄的。',
-        '好像被关在尿布里。', '这墙糊了什么？']],
-      [['地毯', '鞋底', '裤腿'], ['好', '都'],
-       ['湿。', '黏。', '脏了。']],
-      [['你听这个嗡嗡声！', '灯一闪我就抖一下。',
-        '蜜蜂窝吗这是？']],
-    ]
-  },
-  1: { // 车库
-    xw: [
-      [['这味', '汽油味', '机油味'],
-       ['很', '挺'], ['呛。', '熟悉。', '难闻。']],
-      [['车里', '后备箱', '驾驶座'],
-       ['别', '不要'], ['看。', '伸手。', '碰。']],
-      [['水泥地', '油渍', '柱子'], ['', '挺'],
-       ['滑。', '碍事。', '挡视线。']],
-    ],
-    xl: [
-      [['好多车……', '哪辆是真的？', '会不会有人？',
-        '那辆开着大灯诶。']],
-      [['汽油味', '柴油味'], ['熏死我了。', '我都晕了。']],
-      [['咯吱咯吱的，', '扑通一声，', '哐当一下，'],
-       ['是', '听见了吗，'], ['哪里？', '车里？', '柱子后面？']],
-    ]
-  },
-  2: { // 发电厂
-    xw: [
-      [['别', '千万别'], ['碰', '靠近', '踩'],
-       ['电缆。', '配电箱。', '裸线。', '湿地面。']],
-      [['火花', '弧光'], ['', '挺'], ['吓人。', '危险。', '亮。']],
-      [['噪音太大，', '机器太响，'],
-       ['', '我'], ['听不见你。', '说话听不清。']],
-    ],
-    xl: [
-      [['会不会触电？', '这线是断的吗？',
-        '我闻到焦味……', '我头发都竖起来了。']],
-      [['电！', '小心！', '别动！'], ['', '别再走了。']],
-      [['这是个变电站？', '发电厂？', '机房？',
-        '我们在哪里啊。']],
-    ]
-  },
-  3: { // 游泳池
-    xw: [
-      [['水', '池子'], ['', '可能'],
-       ['很深。', '不能淌。', '有东西。', '回声大。']],
-      [['氯气', '消毒水', '潮气'],
-       ['味道', '气味'], ['很重。', '熏眼睛。', '难闻。']],
-      [['水声', '回声'], ['会', '能'],
-       ['暴露我们。', '招它来。', '盖住脚步。']],
-    ],
-    xl: [
-      [['好像无边泳池啊……', '真大。', '真蓝。',
-        '我都想跳下去了。']],
-      [['可不能下水。', '我不会游泳。', '泳衣呢？',
-        '袜子湿了。']],
-      [['你听这回声！', '哎呀我说话都飘了！',
-        '咱们在大澡堂里。']],
-    ]
-  },
-  4: { // 农场
-    xw: [
-      [['天空', '云', '阳光'],
-       ['', '都'], ['是假的。', '不动。', '不对劲。', '太干净。']],
-      [['这片', '这'], ['麦田', '玉米地', '草地'],
-       ['很', '太'], ['静。', '空。', '怪。']],
-      [['有动静。', '麦穗在抖。', '有什么藏在里面。',
-        '别走进去。']],
-    ],
-    xl: [
-      [['好漂亮……', '居然有蓝天！', '我想在这里躺一天。',
-        '是真的太阳吗？']],
-      [['那是稻草人吗？', '那个是不是动了？',
-        '它刚刚转头了！']],
-      [['我闻到牛粪了，', '土味，', '青草味，'],
-       ['', '挺'], ['亲切的。', '熟悉的。']],
-    ]
-  },
-  5: { // 幼儿园
-    xw: [
-      [['', '这玩具，'],
-       ['别', '不要'], ['碰。', '捡。', '看太久。']],
-      [['儿歌', '童声', '笑声'],
-       ['', '不像'], ['真的。', '正常。', '小孩唱的。']],
-      [['这种', '这片'], ['粉色', '装饰', '布置'],
-       ['', '挺'], ['假。', '吓人。', '过头了。']],
-    ],
-    xl: [
-      [['好恐怖啊。', '为什么幼儿园这么吓人。',
-        '我又想哭。', '这熊娃娃眼睛看我！']],
-      [['你听到童谣了吗？', '哪里在唱歌？',
-        '这是录音吗？']],
-      [['滑梯上', '木马上', '黑板上'],
-       ['', '好像'], ['有人。', '有血。', '写着字。']],
-    ]
-  },
-  6: { // 办公室
-    xw: [
-      [['', '电脑'], ['别', '不要'],
-       ['乱碰。', '看屏幕。', '点开。']],
-      [['打印机', '复印机', '电话'],
-       ['一直在', '突然'], ['响。', '动。', '工作。']],
-      [['工位', '隔间'], ['里', ''],
-       ['', '可能'], ['有东西。', '有人。', '别探头。']],
-    ],
-    xl: [
-      [['好像我加班的公司。', '怎么这么多人？', '没人。',
-        '到处是空椅子。']],
-      [['这是什么会议？', '邮件还在响诶！',
-        '咖啡机居然能用！']],
-      [['打卡机', '门禁', '工牌'], ['还能', '居然能'],
-       ['用？', '响？', '过？']],
-    ]
-  },
-  7: { // 图书馆
-    xw: [
-      [['书', '书架'], ['别', '不要'],
-       ['乱抽。', '翻。', '撞。']],
-      [['', '这种'], ['灰尘', '霉味', '安静'],
-       ['', '让我'], ['打喷嚏。', '想睡。', '心慌。']],
-      [['书脊', '页码', '索引'],
-       ['对不上。', '是乱的。', '在变。']],
-    ],
-    xl: [
-      [['好多书啊！', '我喜欢这里。', '能不能借一本走？',
-        '这书写的是中文吗？']],
-      [['你听到翻书声没？', '没人却在翻。',
-        '上面有人。']],
-      [['这味道', '这光', '这安静'],
-       ['', '挺'], ['像我中学。', '舒服。', '怪温柔。']],
-    ]
-  },
-  8: { // 地铁站
-    xw: [
-      [['铁轨', '黄线'], ['别', '不要'],
-       ['踩。', '过去。', '靠太近。']],
-      [['隧道里', '远处'], ['好像', '似乎'],
-       ['有风。', '有灯。', '有声响。']],
-      [['末班车', '调度', '广播'],
-       ['', '可能'], ['是假的。', '别信。', '是诱饵。']],
-    ],
-    xl: [
-      [['末班车几点啊？', '怎么没人查票？',
-        '会不会真的来车？']],
-      [['隧道里有风诶！', '黑乎乎的。',
-        '不会有列车冲出来吧？']],
-      [['我以前', '我大学'], ['', '就'],
-       ['坐这条线。', '住这站附近。', '在这里加过班。']],
-    ]
-  },
-  9: { // 终焉
-    xw: [
-      [['', '看到那束光了？'],
-       ['坚持', '撑'], ['住。', '一下。', '到最后。']],
-      [['不要', '别'], ['停。', '回头。', '害怕。', '说话。']],
-      [['终点', '出口'], ['就', '近'],
-       ['在前面。', '了。', '在这里。']],
-    ],
-    xl: [
-      [['好黑啊……', '看不见你！',
-        '哥你在吗？', '那是亮的吗？']],
-      [['终于到头了？', '是不是结束了？',
-        '我活着出去了？']],
-      [['我哭了。', '我太累了。', '我想睡个十年。',
-        '回家以后我天天吃火锅。']],
-    ]
-  }
-};
-const FLOOR_LINES = {};
-for (const k of Object.keys(_floorTemplates)) {
-  const ft = _floorTemplates[k];
-  FLOOR_LINES[k] = { xw: fromTemplates(ft.xw), xl: fromTemplates(ft.xl) };
-}
-
-const COMPANION_LINE_LIB = {
-  '小王': {
-    generic: LINES_XW_GENERIC, fear: LINES_XW_FEAR,
-    safe: LINES_XW_SAFE, item: LINES_XW_ITEM,
-    floor: Object.fromEntries(Object.entries(FLOOR_LINES).map(([k,v]) => [k, v.xw])),
-  },
-  '小李': {
-    generic: LINES_XL_GENERIC, fear: LINES_XL_FEAR,
-    safe: LINES_XL_SAFE, item: LINES_XL_ITEM,
-    floor: Object.fromEntries(Object.entries(FLOOR_LINES).map(([k,v]) => [k, v.xl])),
-  },
-};
-
-const _totalLines = Object.values(COMPANION_LINE_LIB).reduce((acc, sp) => {
-  let n = sp.generic.length + sp.fear.length + sp.safe.length + sp.item.length;
-  for (const f of Object.values(sp.floor)) n += f.length;
-  return acc + n;
-}, 0);
-console.log('[lines] total companion conversation pool:', _totalLines);
-
-function pickCompanionLine(speakerName) {
-  const lib = COMPANION_LINE_LIB[speakerName];
-  if (!lib) return '……';
-  const pp = controls.getObject().position;
-  let nearestEntity = Infinity;
-  for (const e of entities) {
-    const d = e.mesh.position.distanceTo(pp);
-    if (d < nearestEntity) nearestEntity = d;
-  }
-  const inFear = nearestEntity < 9 || player.sanity < 0.35 || player.hp < 0.4;
-  const inSafe = nearestEntity > 22 && player.sanity > 0.85 && player.hp > 0.85;
-  const justAteAlmond = player.speedBoost > 5;
-
-  let pool;
-  if (justAteAlmond && lib.item.length && Math.random() < 0.6) pool = lib.item;
-  else if (inFear && lib.fear.length && Math.random() < 0.7)   pool = lib.fear;
-  else if (inSafe && lib.safe.length && Math.random() < 0.5)   pool = lib.safe;
-  else if (Math.random() < 0.35 && lib.floor[currentLevel] && lib.floor[currentLevel].length)
-    pool = lib.floor[currentLevel];
-  else pool = lib.generic;
-  return pool[Math.floor(Math.random() * pool.length)];
-}
-
-// Compatibility shim — older code references this name.
-const COMPANION_LINES_GENERIC = LINES_XW_GENERIC.concat(LINES_XL_GENERIC);
-
-// ============================================================
 // Input
 // ============================================================
 const keys = {};
@@ -2326,6 +1830,7 @@ addEventListener('keydown', e => {
   if (e.code === 'Digit1') setWeapon('pistol');
   else if (e.code === 'Digit2') setWeapon('ak47');
   else if (e.code === 'Digit3') setWeapon('knife');
+  else if (e.code === 'Digit4') setWeapon('rocket');
   else if (e.code === 'KeyQ') {
     const idx = WEAPON_ORDER.indexOf(player.weapon);
     setWeapon(WEAPON_ORDER[(idx + 1) % WEAPON_ORDER.length]);
@@ -2358,6 +1863,7 @@ function useWeapon() {
   if (!w) return;
   if (w.kind === 'gun') fireGun();
   else if (w.kind === 'melee') trySwingKnife();
+  else if (w.kind === 'rocket') fireRocket();
 }
 
 const _gunRay = new THREE.Raycaster();
@@ -2425,6 +1931,147 @@ function fireGun() {
     player.sanity = Math.max(0, player.sanity - w.sanityHitCompanion);
     say(`你射杀了 ${target.ref.name}……`, 3);
   }
+}
+
+function fireRocket() {
+  const w = WEAPONS.rocket;
+  if (player.gunRecoil > 0) return;
+  if (!levelGroup) return;
+  player.gunRecoil = w.cooldown;
+  // Launch sound: low whoosh + high crackle
+  blip(80, 0.35, 0.45); blip(180, 0.20, 0.30);
+  // Muzzle flash on weapon
+  const flash = w.held.userData.flash;
+  if (flash) {
+    flash.material.opacity = 1.0;
+    setTimeout(() => { flash.material.opacity = 0; }, 80);
+  }
+  // Screen flash
+  flashEl.style.opacity = String(w.flashScreen);
+  setTimeout(() => flashEl.style.opacity = '0', 100);
+
+  // Spawn projectile from muzzle
+  const dir = new THREE.Vector3();
+  camera.getWorldDirection(dir);
+  const start = controls.getObject().position.clone();
+  start.addScaledVector(dir, 0.9);
+  start.y -= 0.05;
+
+  const rocket = new THREE.Group();
+  const body = new THREE.Mesh(
+    new THREE.CylinderGeometry(0.06, 0.045, 0.40, 10),
+    new THREE.MeshLambertMaterial({ color: 0x666666, emissive: 0x441100, emissiveIntensity: 0.5 })
+  );
+  body.rotation.x = Math.PI / 2;
+  rocket.add(body);
+  const tip = new THREE.Mesh(
+    new THREE.ConeGeometry(0.045, 0.10, 10),
+    new THREE.MeshBasicMaterial({ color: 0xff6644 })
+  );
+  tip.rotation.x = -Math.PI / 2;
+  tip.position.z = -0.25;
+  rocket.add(tip);
+  // Trail flame light
+  const flame = new THREE.PointLight(0xff8033, 3.0, 5, 2);
+  flame.position.z = 0.20;
+  rocket.add(flame);
+
+  rocket.position.copy(start);
+  // Orient rocket along travel direction
+  const lookAt = start.clone().add(dir);
+  rocket.lookAt(lookAt);
+  levelGroup.add(rocket);
+
+  rockets.push({
+    mesh: rocket, pos: start.clone(), dir: dir.clone().normalize(),
+    age: 0, light: flame,
+  });
+}
+
+function explode(pos) {
+  if (!levelGroup) return;
+  const radius = WEAPONS.rocket.blastRadius;
+  // Visual flash sphere — animated via the main tick loop.
+  const flashMesh = new THREE.Mesh(
+    new THREE.SphereGeometry(0.5, 16, 12),
+    new THREE.MeshBasicMaterial({ color: 0xfff2a0, transparent: true, opacity: 1.0 })
+  );
+  flashMesh.position.copy(pos);
+  levelGroup.add(flashMesh);
+  const blastLight = new THREE.PointLight(0xff8044, 6, 12, 2);
+  blastLight.position.copy(pos);
+  levelGroup.add(blastLight);
+  let age = 0;
+  function animate() {
+    age += 0.05;
+    flashMesh.scale.setScalar(1 + age * 5);
+    flashMesh.material.opacity = Math.max(0, 1 - age);
+    blastLight.intensity = Math.max(0, 6 - age * 7);
+    if (age < 1) requestAnimationFrame(animate);
+    else {
+      levelGroup.remove(flashMesh);
+      levelGroup.remove(blastLight);
+      flashMesh.geometry.dispose();
+      flashMesh.material.dispose();
+    }
+  }
+  animate();
+
+  // Sound: deep boom
+  blip(45, 0.45, 0.55);
+  blip(120, 0.35, 0.40);
+  blip(220, 0.25, 0.25);
+  playStatic();
+
+  // Damage entities
+  for (let i = entities.length - 1; i >= 0; i--) {
+    const e = entities[i];
+    if (!e.mesh) continue;
+    const d = e.mesh.position.distanceTo(pos);
+    if (d < radius) {
+      e.hp = (e.hp ?? 1) - WEAPONS.rocket.blastDamage;
+      if (e.hp <= 0) {
+        leaveCorpse(e.mesh);
+        entities.splice(i, 1);
+      }
+    }
+  }
+  // Damage companions (friendly fire — be careful where you aim)
+  for (const c of companions) {
+    if (!c.alive || !c.mesh) continue;
+    if (c.mesh.position.distanceTo(pos) < radius) {
+      c.alive = false;
+      const m = c.mesh;
+      c.mesh = null;
+      leaveCorpse(m);
+      playDeathCry(c);
+    }
+  }
+  // Self-damage if too close
+  const playerPos = controls.getObject().position;
+  const pd = playerPos.distanceTo(pos);
+  if (pd < radius) {
+    player.hp -= 0.6 * (1 - pd / radius);
+  }
+  // Knock walls down
+  destroyWallsAt(pos, radius);
+}
+
+function destroyWallsAt(pos, radius) {
+  if (!wallMeshRef) return;
+  const r2 = radius * radius;
+  const zeroMat = new THREE.Matrix4().makeScale(0.0001, 0.0001, 0.0001);
+  let removed = 0;
+  for (let i = wallBoxes.length - 1; i >= 0; i--) {
+    const wb = wallBoxes[i];
+    const dx = wb.x - pos.x, dz = wb.z - pos.z;
+    if (dx * dx + dz * dz < r2) {
+      wallMeshRef.setMatrixAt(wb.instanceIdx, zeroMat);
+      wallBoxes.splice(i, 1);
+      removed++;
+    }
+  }
+  if (removed > 0) wallMeshRef.instanceMatrix.needsUpdate = true;
 }
 
 function trySwingKnife() {
@@ -2533,6 +2180,11 @@ function resetAll() {
   player.hasKnife = true; player.knifeSwing = 0;
   player.gunRecoil = 0; player.shotsFired = 0;
   player.kills = { entities: 0, companions: 0 };
+  player.dying = 0;
+  player.lyingDown = false;
+  player.standingUp = null;
+  player.hasWokenUp = true;
+  camera.rotation.x = 0;
   setWeapon('pistol');
   for (const c of companions) { c.hp = 1; c.alive = true; }
   buildLevel(0);
@@ -2567,7 +2219,28 @@ function tick() {
   const dt = Math.min(clock.getDelta(), 0.05);
   const t = clock.elapsedTime;
 
-  if (controls.isLocked) {
+  // ---- Wake-up: if lying down at game start, any WASD triggers stand-up ----
+  if (player.lyingDown) {
+    const obj = controls.getObject();
+    obj.position.y = 0.30;
+    if (keys['KeyW'] || keys['KeyA'] || keys['KeyS'] || keys['KeyD'] || keys['Space']) {
+      player.lyingDown = false;
+      player.standingUp = 0;
+    }
+  }
+  if (player.standingUp !== undefined && player.standingUp !== null) {
+    player.standingUp = Math.min(1, player.standingUp + dt * 1.2);
+    const obj = controls.getObject();
+    obj.position.y = 0.30 + (1.7 - 0.30) * player.standingUp;
+    camera.rotation.x = -Math.PI * 0.4 * (1 - player.standingUp);
+    if (player.standingUp >= 1) {
+      player.standingUp = null;
+      player.hasWokenUp = true;
+      camera.rotation.x = 0;
+    }
+  }
+
+  if (controls.isLocked && !player.dying && !player.lyingDown && player.standingUp == null) {
     const boostMul = player.speedBoost > 0 ? 1.45 : 1.0;
     const sprint = keys['ShiftLeft'] && player.stamina > 0.05;
     const speed = (sprint ? 6 : 3.2) * boostMul;
@@ -2793,12 +2466,61 @@ function tick() {
     const alive = companions.filter(c => c.alive);
     if (alive.length) {
       const c = alive[Math.floor(Math.random()*alive.length)];
-      const raw = pickCompanionLine(c.name);
+      let nearestEntityDist = Infinity;
+      const _pp = controls.getObject().position;
+      for (const ee of entities) {
+        const _d = ee.mesh.position.distanceTo(_pp);
+        if (_d < nearestEntityDist) nearestEntityDist = _d;
+      }
+      const raw = pickCompanionLine(c.name, {
+        nearestEntityDist,
+        sanity: player.sanity,
+        hp: player.hp,
+        speedBoost: player.speedBoost,
+        currentLevel,
+      });
       const line = `${c.name}：「${raw}」`;
       say(line, 4);
       speak(c.name, line);
     }
     companionLineCooldown = 8 + Math.random()*8;
+  }
+
+  // ---- Rocket projectiles ----
+  for (let i = rockets.length - 1; i >= 0; i--) {
+    const r = rockets[i];
+    r.age += dt;
+    r.pos.addScaledVector(r.dir, 32 * dt);
+    r.mesh.position.copy(r.pos);
+
+    let hit = false;
+    // Wall collision
+    for (const wb of wallBoxes) {
+      const dx = r.pos.x - wb.x, dz = r.pos.z - wb.z;
+      if (Math.abs(dx) < wb.half + 0.15 && Math.abs(dz) < wb.half + 0.15) { hit = true; break; }
+    }
+    // Entity collision
+    if (!hit) {
+      for (const e of entities) {
+        if (e.mesh && e.mesh.position.distanceTo(r.pos) < 1.0) { hit = true; break; }
+      }
+    }
+    // Floor or ceiling
+    if (r.pos.y < 0.05 || r.pos.y > WALL_HEIGHT) hit = true;
+    // Time-out / out-of-bounds
+    if (r.age > 4.0) hit = true;
+    const limit = (GRID/2) * CELL;
+    if (Math.abs(r.pos.x) > limit || Math.abs(r.pos.z) > limit) hit = true;
+
+    if (hit) {
+      explode(r.pos.clone());
+      if (levelGroup) levelGroup.remove(r.mesh);
+      r.mesh.traverse(o => {
+        if (o.geometry) o.geometry.dispose();
+        if (o.material) o.material.dispose();
+      });
+      rockets.splice(i, 1);
+    }
   }
 
   for (const e of entities) {
@@ -2863,8 +2585,8 @@ function tick() {
     }
 
     if (dist < 1.0 && deathScreen.style.display !== 'flex') {
-      player.hp -= dt * 0.6;
-      flashEl.style.opacity = '0.6';
+      player.hp -= dt * 0.20;     // ~5s of contact to die (was 1.7s)
+      flashEl.style.opacity = '0.4';
       setTimeout(() => flashEl.style.opacity = '0', 120);
     }
     for (const c of companions) {
@@ -2887,12 +2609,37 @@ function tick() {
     }
   }
 
-  if (player.hp <= 0 && deathScreen.style.display !== 'flex') {
-    flashEl.style.opacity = '1';
-    setTimeout(() => flashEl.style.opacity = '0', 250);
+  // Player death — animate camera collapsing, leave a visible corpse.
+  if (player.hp <= 0 && deathScreen.style.display !== 'flex' && !player.dying) {
+    player.dying = 0.001;
+    player.deathPos = controls.getObject().position.clone();
     playStatic();
-    deathScreen.style.display = 'flex';
-    controls.unlock();
+  }
+  if (player.dying > 0) {
+    player.dying = Math.min(1, player.dying + dt / 1.4);
+    const obj = controls.getObject();
+    obj.position.y = 1.7 - 1.45 * player.dying;
+    camera.rotation.x = -Math.PI * 0.5 * player.dying;
+    flashEl.style.background = '#600000';
+    flashEl.style.opacity = String(0.55 * player.dying);
+    if (player.dying >= 1 && deathScreen.style.display !== 'flex') {
+      // Drop a player corpse at the death position.
+      if (player.deathPos && levelGroup) {
+        const corpse = buildProceduralCompanion(0x9a3a3a, 0x2a2a3a);
+        corpse.position.copy(player.deathPos);
+        corpse.position.y = 0;
+        leaveCorpse(corpse);
+        levelGroup.add(corpse);
+      }
+      setTimeout(() => {
+        deathScreen.style.display = 'flex';
+        flashEl.style.background = '#000';
+        flashEl.style.opacity = '0';
+        controls.unlock();
+        camera.rotation.x = 0;
+        player.dying = 0;
+      }, 450);
+    }
   }
 
   let nearestLightDist = Infinity;
@@ -2908,10 +2655,17 @@ function tick() {
   if (inLight) player.sanity += dt * 0.02;
   player.sanity = THREE.MathUtils.clamp(player.sanity, 0, 1);
 
-  if (audioCtx) {
+  // HP slowly regenerates when no entity is breathing down your neck.
+  if (fearProx < 0.25 && player.hp < 1) {
+    player.hp = Math.min(1, player.hp + dt * 0.05);
+  }
+
+  const _ac = getAudioCtx();
+  if (_ac) {
     const interval = 1.6 - fearProx * 1.0;
-    if (t - lastHeart > interval) { heartbeat(); lastHeart = t; }
-    if (humGain) humGain.gain.value = 0.04 + (1 - player.sanity) * 0.06;
+    if (t - getLastHeart() > interval) { heartbeat(player.sanity); setLastHeart(t); }
+    const _hg = getHumGain();
+    if (_hg) _hg.gain.value = 0.04 + (1 - player.sanity) * 0.06;
   }
 
   if (Math.random() < dt * 0.05 * (1 - player.sanity + fearProx)) {
@@ -2946,13 +2700,13 @@ function tick() {
     const dx = pp.x - stairExit.pos.x, dz = pp.z - stairExit.pos.z;
     if (dx*dx + dz*dz < 1.6*1.6) {
       const tag = currentLevel === LEVELS.length - 1 ? '逃出后室' : '下一层';
-      if (subTimer <= 0) say(`按 E ${tag}`, 0.4);
+      if (getSubTimer() <= 0) say(`按 E ${tag}`, 0.4);
     }
   }
   if (elevator) {
     const dx = pp.x - elevator.pos.x, dz = pp.z - elevator.pos.z;
     if (!elevatorTransition && dx*dx + dz*dz < 2.0*2.0) {
-      if (subTimer <= 0) say('按 E 进入电梯', 0.4);
+      if (getSubTimer() <= 0) say('按 E 进入电梯', 0.4);
     }
     if (elevator.btn) elevator.btn.material.color.setHSL(0.55, 0.8, 0.45 + Math.sin(t*4)*0.2);
     // Animate doors based on doorOpen state (0 closed → 1 open)
@@ -3009,10 +2763,7 @@ function tick() {
 
   scene.fog.far = LEVELS[currentLevel].fogFar - (1 - player.sanity) * 10;
 
-  if (subTimer > 0) {
-    subTimer -= dt;
-    if (subTimer <= 0) subEl.style.opacity = '0';
-  }
+  tickSubtitle(dt);
 
   renderer.render(scene, camera);
   requestAnimationFrame(tick);
