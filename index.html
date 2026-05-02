@@ -609,18 +609,19 @@ _gltfLoader.load(
   (err) => console.warn('[gltf] Soldier load failed', err)
 );
 
-// 2) RobotExpressive — used as the girl team-member model.
+// 2) Kira (from three.js webgl_animation_skinning_ik example) — used as
+//    the girl team-member model. Skinned humanoid female with a Run clip.
 _gltfLoader.load(
-  'https://threejs.org/examples/models/gltf/RobotExpressive/RobotExpressive.glb',
+  'https://threejs.org/examples/models/gltf/kira.glb',
   (gltf) => {
     girlProto = gltf.scene;
     girlAnims = gltf.animations || [];
     girlLoaded = true;
-    console.log('[gltf] RobotExpressive (girl) animations:', girlAnims.map(a => a.name));
+    console.log('[gltf] Kira (girl) animations:', girlAnims.map(a => a.name));
     scheduleGLTFUpgrade();
   },
   undefined,
-  (err) => console.warn('[gltf] RobotExpressive load failed; staying procedural', err)
+  (err) => console.warn('[gltf] Kira load failed; staying procedural', err)
 );
 
 // ---- Feminine reskin attached to GLTF bones ----
@@ -788,20 +789,29 @@ function attachFeminineReskin(bones, palette) {
 }
 
 function buildGLTFGirl(palette, name) {
-  // Use RobotExpressive for the team. It's a friendly cartoon humanoid
-  // with rich animations; we tint it with the companion's dress colour
-  // and add a hair-bow accent so it reads "girl team-member" at a glance.
+  // Kira (from the three.js webgl_animation_skinning_ik example) — a skinned
+  // humanoid female with at least a "Run" animation clip. Per-instance
+  // material tint with a small hair-bow accent on the head bone.
   if (!girlLoaded) return null;
   const root = SkeletonUtils.clone(girlProto);
-  root.scale.set(0.55, 0.55, 0.55); // RobotExpressive is ~1.6m at scale 1
-  // Tint each material toward the dress colour
+  // Kira's authoring scale tends to be very large (~100). Compute a bbox
+  // and rescale so she stands ~1.7m tall.
+  const bbox = new THREE.Box3().setFromObject(root);
+  const h = bbox.max.y - bbox.min.y;
+  if (h > 0.001) {
+    const targetH = 1.7;
+    const s = targetH / h;
+    root.scale.setScalar(s);
+    // After scale, make sure feet sit on y=0 by accounting for any offset.
+    const bbox2 = new THREE.Box3().setFromObject(root);
+    root.position.y -= bbox2.min.y;
+  }
+  // Tint each material toward the dress colour so each girl has her own look
   const tint = new THREE.Color(palette.dressColor);
-  const accent = new THREE.Color(palette.accentColor);
   root.traverse(o => {
     if (o.isMesh && o.material) {
       o.material = o.material.clone();
-      if (o.material.color) o.material.color.lerp(tint, 0.55);
-      if (o.material.emissive) o.material.emissive.lerp(accent, 0.3);
+      if (o.material.color) o.material.color.lerp(tint, 0.30);
       o.castShadow = false;
       o.frustumCulled = false;
     }
@@ -821,17 +831,21 @@ function buildGLTFGirl(palette, name) {
     bow.scale.set(0.9, 0.9, 0.55);
     headBone.add(bow);
   }
-  // Animation mixer — RobotExpressive has Idle, Walking, Running, Wave, Yes, No, etc.
+  // Animation mixer — Kira commonly ships with a single "Run" clip; reuse
+  // it for all motion states (weight ramps in scheduleGLTFUpgrade tick).
   const mixer = new THREE.AnimationMixer(root);
   let idleAct = null, walkAct = null, runAct = null;
   for (const clip of girlAnims) {
-    if (/^idle$/i.test(clip.name))     idleAct = mixer.clipAction(clip);
-    else if (/walking/i.test(clip.name)) walkAct = mixer.clipAction(clip);
-    else if (/running/i.test(clip.name)) runAct  = mixer.clipAction(clip);
+    if (/idle/i.test(clip.name))         idleAct = mixer.clipAction(clip);
+    else if (/walk/i.test(clip.name))     walkAct = mixer.clipAction(clip);
+    else if (/run/i.test(clip.name))      runAct  = mixer.clipAction(clip);
   }
-  if (idleAct) { idleAct.play(); idleAct.setEffectiveWeight(1); }
-  if (walkAct) { walkAct.play(); walkAct.setEffectiveWeight(0); }
-  if (runAct)  { runAct.play();  runAct.setEffectiveWeight(0); }
+  // If we only have one clip, use it as the walk loop.
+  if (!walkAct && runAct) walkAct = runAct;
+  if (!idleAct && walkAct) idleAct = walkAct;
+  if (idleAct) { idleAct.play(); idleAct.setEffectiveWeight(idleAct === walkAct ? 0 : 1); }
+  if (walkAct && walkAct !== idleAct) { walkAct.play(); walkAct.setEffectiveWeight(0); }
+  if (runAct && runAct !== walkAct && runAct !== idleAct) { runAct.play(); runAct.setEffectiveWeight(0); }
   root.userData.gltf = {
     mixer, idleAct, walkAct, runAct,
     headBone,
