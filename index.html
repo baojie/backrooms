@@ -190,7 +190,15 @@ import {
   say, speak, whispers, setCompanions as _setCompanionsForTTS, tickSubtitle, getSubTimer,
 } from './js/tts.js';
 import { pickCompanionLine, COMPANION_LINES_GENERIC } from './js/lines.js';
-import { buildMaze as _buildMaze } from './js/maze.js';
+import {
+  buildMaze, buildOpen, buildParking, buildIndustrial,
+  buildClassrooms, buildCubicles, buildShelves, buildPlatforms,
+} from './js/maze.js';
+const LAYOUT_BUILDERS = {
+  maze: buildMaze, open: buildOpen, parking: buildParking,
+  industrial: buildIndustrial, classrooms: buildClassrooms,
+  cubicles: buildCubicles, shelves: buildShelves, platforms: buildPlatforms,
+};
 
 // Bridge: audio's death cry needs the TTS speak callback
 function playDeathCry(c) { _playDeathCry(c, speak); }
@@ -1627,8 +1635,11 @@ function buildHumanoidEntity() {
   return g;
 }
 
-// Maze building lives in js/maze.js — assign result to the local `cells` ref.
-function buildMaze() { cells = _buildMaze(GRID); }
+// Layout dispatch lives in js/maze.js — assign result to the local `cells` ref.
+function buildLayout(layout) {
+  const fn = LAYOUT_BUILDERS[layout] || buildMaze;
+  cells = fn(GRID);
+}
 
 // ============================================================
 // Level builder
@@ -1659,15 +1670,7 @@ function buildLevel(n, opts = {}) {
   levelGroup = new THREE.Group();
   scene.add(levelGroup);
 
-  buildMaze();
-
-  // Some levels are a single open space, not a maze. Clear all interior
-  // cells so only the outer border remains as walls.
-  if (cfg.openSpace || cfg.props === 'cars' || cfg.props === 'water') {
-    for (let x = 1; x < GRID-1; x++)
-      for (let z = 1; z < GRID-1; z++)
-        cells[x][z].wall = false;
-  }
+  buildLayout(cfg.layout);
 
   const wallTex   = makeNoiseTexture(128, cfg.wallRGB, 32, 2);
   const floorTex  = makeNoiseTexture(128, cfg.floorRGB, 50, GRID);
@@ -1948,7 +1951,7 @@ function buildLevel(n, opts = {}) {
 
   spawnProps(cfg, openCells);
 
-  const numEntities = 1 + Math.floor(n / 3);
+  const numEntities = 3;
   // Entities must spawn far from the player so the game doesn't start
   // with one chewing on you. Require at least ~14m straight-line distance.
   const MIN_ENTITY_DIST_SQ = 14 * 14;
