@@ -132,7 +132,7 @@
   <div class="box">
     <h2>电梯 / Elevator</h2>
     <div class="floors" id="floorList"></div>
-    <div class="hint">数字键 1-9, 0=10　|　ESC 关闭</div>
+    <div class="hint">数字键 1-9, 0=10　|　ESC 关闭　|　游戏中 Shift+数字 直达楼层</div>
   </div>
 </div>
 
@@ -1663,7 +1663,7 @@ function buildLevel(n, opts = {}) {
 
   // Some levels are a single open space, not a maze. Clear all interior
   // cells so only the outer border remains as walls.
-  if (cfg.openSpace || cfg.props === 'cars') {
+  if (cfg.openSpace || cfg.props === 'cars' || cfg.props === 'water') {
     for (let x = 1; x < GRID-1; x++)
       for (let z = 1; z < GRID-1; z++)
         cells[x][z].wall = false;
@@ -2203,13 +2203,24 @@ function spawnProps(cfg, openCells) {
       break;
     }
     case 'water': {
-      const water = new THREE.Mesh(
-        new THREE.PlaneGeometry(GRID*CELL, GRID*CELL),
-        new THREE.MeshBasicMaterial({ color: 0x4ab0d0, transparent:true, opacity:0.55 })
+      // Whole level is flooded — player wades through it.
+      const planeGeo = new THREE.PlaneGeometry(GRID*CELL, GRID*CELL);
+      // Bottom tint just above the floor (cheap caustic look).
+      const bottom = new THREE.Mesh(
+        planeGeo,
+        new THREE.MeshBasicMaterial({ color: 0x2a78a0, transparent:true, opacity:0.55 })
       );
-      water.rotation.x = -Math.PI/2;
-      water.position.y = 0.05;
-      levelGroup.add(water);
+      bottom.rotation.x = -Math.PI/2;
+      bottom.position.y = 0.04;
+      levelGroup.add(bottom);
+      // Surface — translucent, drawn from both sides so it's visible underwater too.
+      const surface = new THREE.Mesh(
+        planeGeo.clone(),
+        new THREE.MeshBasicMaterial({ color: 0x9fdcef, transparent:true, opacity:0.35, side: THREE.DoubleSide, depthWrite:false })
+      );
+      surface.rotation.x = -Math.PI/2;
+      surface.position.y = 1.05;   // ~waist-deep on a 1.7m camera
+      levelGroup.add(surface);
       break;
     }
     case 'crops': {
@@ -2377,6 +2388,12 @@ addEventListener('keydown', e => {
     if (overlay.style.display !== 'none') { startGame(); return; }
     if (deathScreen.style.display === 'flex') { deathScreen.click(); return; }
     if (winScreen.style.display === 'flex') { winScreen.click(); return; }
+  }
+  // Shift + digit: jump to floor (1-9 → floor 1-9, 0 → floor 10)
+  if (e.shiftKey && e.code >= 'Digit0' && e.code <= 'Digit9') {
+    const d = parseInt(e.code.slice(5), 10);
+    const idx = d === 0 ? 9 : d - 1;
+    if (idx < LEVELS.length) { e.preventDefault(); gotoFloor(idx); return; }
   }
   keys[e.code] = true;
   if (e.code === 'KeyF') player.flashlightOn = !player.flashlightOn;
@@ -2796,9 +2813,11 @@ function tick() {
   }
 
   if (controls.isLocked && !player.dying && !player.lyingDown && player.standingUp == null) {
+    const inWater = LEVELS[currentLevel]?.props === 'water';
     const boostMul = player.speedBoost > 0 ? 1.45 : 1.0;
+    const waterMul = inWater ? 0.55 : 1.0;
     const sprint = keys['ShiftLeft'] && player.stamina > 0.05;
-    const speed = (sprint ? 6 : 3.2) * boostMul;
+    const speed = (sprint ? 6 : 3.2) * boostMul * waterMul;
     const fwd = (keys['KeyW']?1:0) + (keys['KeyS']?-1:0);
     const str = (keys['KeyD']?1:0) + (keys['KeyA']?-1:0);
 
@@ -2813,8 +2832,9 @@ function tick() {
     obj.position.addScaledVector(dir, speed * dt);
     collide(obj.position);
 
-    if (dir.lengthSq() > 0) obj.position.y = 1.7 + Math.sin(t * (sprint?12:8)) * 0.04;
-    else                    obj.position.y = 1.7;
+    const baseY = inWater ? 1.45 : 1.7;   // crouch-low so water reaches chest
+    if (dir.lengthSq() > 0) obj.position.y = baseY + Math.sin(t * (sprint?12: inWater?5:8)) * (inWater?0.07:0.04);
+    else                    obj.position.y = baseY + (inWater ? Math.sin(t*1.6)*0.02 : 0);
 
     const moved = obj.position.distanceTo(player.lastPos);
     player.totalDist += moved;
