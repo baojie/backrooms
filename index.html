@@ -106,7 +106,7 @@
       <span class="key">ESC</span> 释放鼠标
     </p>
     <p style="margin-top:14px; font-size:12px; color:#a89570;">
-      捡起 <b style="color:#f6e29a">杏仁水</b> 恢复理智并加速。靠近楼梯按 E 进入下一层，或乘 <b style="color:#9ed8ff">电梯</b> 直达任意层。游泳池里小心 <b style="color:#cfefff">电缆</b> 与 <b style="color:#9fff66">毒水</b>，可按 E 上 <b style="color:#c8a070">船</b>。
+      捡起 <b style="color:#f6e29a">杏仁水</b> 恢复理智并加速。靠近楼梯按 E 进入下一层，或乘 <b style="color:#9ed8ff">电梯</b> 直达任意层。游泳池里小心 <b style="color:#cfefff">电缆</b>、<b style="color:#9fff66">毒水</b> 与 <b style="color:#c8b890">飞蛾</b>，可按 E 上 <b style="color:#c8a070">船</b>。按 <span class="key">5</span> 切到 <b style="color:#c8ff66">杀虫剂</b> 灭蛾。
     </p>
     <p style="margin-top:20px; color:#fff">点击进入 / 按 <span class="key">ENTER</span></p>
     <button id="startBtn" autofocus
@@ -257,6 +257,7 @@ let entities = [];
 let electricZones = [];   // live-wire hazards on flooded levels — instant kill on contact
 let toxicZones = [];      // sickly-green water patches — slow damage on contact
 let boats = [];           // boardable boats on flooded levels
+let moths = [];           // fluttering moths — drain hp on contact, killable with insecticide
 let stairExit = null;
 let elevator = null;
 let currentLevel = 0;
@@ -565,6 +566,51 @@ heldRocketPivot.rotation.set(0, -0.04, 0);
 heldRocketPivot.visible = false;
 camera.add(heldRocketPivot);
 
+function buildSprayCanMesh() {
+  const g = new THREE.Group();
+  const canMat = new THREE.MeshLambertMaterial({ color: 0xd4d428 });        // bright yellow can
+  const labelMat = new THREE.MeshBasicMaterial({ color: 0x2a6a1f });        // green label
+  const dark = new THREE.MeshLambertMaterial({ color: 0x222222 });
+  const nozzleMat = new THREE.MeshLambertMaterial({ color: 0xbb1e1e });
+  // Main can body
+  const body = new THREE.Mesh(new THREE.CylinderGeometry(0.075, 0.075, 0.32, 16), canMat);
+  body.position.set(0, 0.0, -0.05);
+  g.add(body);
+  // Label band
+  const label = new THREE.Mesh(new THREE.CylinderGeometry(0.0755, 0.0755, 0.14, 16, 1, true), labelMat);
+  label.position.set(0, 0.0, -0.05);
+  g.add(label);
+  // Top cap
+  const cap = new THREE.Mesh(new THREE.CylinderGeometry(0.07, 0.075, 0.04, 16), dark);
+  cap.position.set(0, 0.18, -0.05);
+  g.add(cap);
+  // Trigger button
+  const btn = new THREE.Mesh(new THREE.BoxGeometry(0.06, 0.03, 0.05), nozzleMat);
+  btn.position.set(0, 0.21, -0.05);
+  g.add(btn);
+  // Nozzle pointing forward
+  const nozzle = new THREE.Mesh(new THREE.CylinderGeometry(0.012, 0.012, 0.06, 8), dark);
+  nozzle.rotation.x = Math.PI / 2;
+  nozzle.position.set(0, 0.21, -0.10);
+  g.add(nozzle);
+  // Mist cone (hidden by default — shown while spraying)
+  const mistMat = new THREE.MeshBasicMaterial({ color: 0xc8ff66, transparent: true, opacity: 0.0, depthWrite: false });
+  const mist = new THREE.Mesh(new THREE.ConeGeometry(0.18, 0.55, 14, 1, true), mistMat);
+  mist.rotation.x = Math.PI / 2;
+  mist.position.set(0, 0.21, -0.42);
+  g.add(mist);
+  g.userData.mist = mist;
+  g.userData.nozzle = nozzle;
+  return g;
+}
+const heldSprayPivot = new THREE.Group();
+const heldSpray = buildSprayCanMesh();
+heldSprayPivot.add(heldSpray);
+heldSprayPivot.position.set(0.28, -0.28, -0.40);
+heldSprayPivot.rotation.set(0, -0.05, 0);
+heldSprayPivot.visible = false;
+camera.add(heldSprayPivot);
+
 const WEAPONS = {
   pistol: {
     name: '手枪 Pistol',  kind: 'gun',
@@ -592,8 +638,14 @@ const WEAPONS = {
     recoilKick: 1.6, flashScreen: 0.45,
     blastRadius: 5.0, blastDamage: 5.0,
   },
+  spray: {
+    name: '杀虫剂 Insecticide', kind: 'spray',
+    pivot: heldSprayPivot, held: heldSpray,
+    cooldown: 0, auto: true,
+    range: 4.5, coneCos: 0.78,   // ~38° half-angle cone
+  },
 };
-const WEAPON_ORDER = ['pistol', 'ak47', 'knife', 'rocket'];
+const WEAPON_ORDER = ['pistol', 'ak47', 'knife', 'rocket', 'spray'];
 
 // ============================================================
 // Web-resourced humanoid models (Three.js examples GLBs)
@@ -1664,7 +1716,7 @@ function disposeLevel() {
     }
   });
   levelGroup = null;
-  wallBoxes = []; lights = []; almonds = []; knives = []; entities = []; electricZones = []; toxicZones = []; boats = []; stairExit = null; elevator = null;
+  wallBoxes = []; lights = []; almonds = []; knives = []; entities = []; electricZones = []; toxicZones = []; boats = []; moths = []; stairExit = null; elevator = null;
   player.boat = null;
   wallMeshRef = null;
   rockets = [];
@@ -2355,6 +2407,42 @@ function spawnProps(cfg, openCells) {
         levelGroup.add(boat);
         boats.push({ mesh: boat, x: wx, z: wz, yaw: boat.rotation.y, occupied: false });
       }
+
+      // Moths — fluttering hostile insects that drain hp on contact. Killable with insecticide.
+      const NUM_MOTHS = 8;
+      for (let i = 0; i < NUM_MOTHS; i++) {
+        const moth = new THREE.Group();
+        const bodyMat = new THREE.MeshLambertMaterial({ color: 0x554028 });
+        const wingMat = new THREE.MeshLambertMaterial({ color: 0xc8b890, transparent:true, opacity:0.85, side: THREE.DoubleSide });
+        const eyeMat = new THREE.MeshBasicMaterial({ color: 0xff6633 });
+        const body = new THREE.Mesh(new THREE.SphereGeometry(0.10, 6, 5), bodyMat);
+        body.scale.set(1, 0.6, 1.6);
+        moth.add(body);
+        const wL = new THREE.Mesh(new THREE.PlaneGeometry(0.45, 0.30), wingMat);
+        wL.position.set(0.22, 0.02, 0);
+        wL.rotation.y = 0.3;
+        moth.add(wL);
+        const wR = wL.clone();
+        wR.position.x = -0.22;
+        wR.rotation.y = -0.3;
+        moth.add(wR);
+        const eye = new THREE.Mesh(new THREE.SphereGeometry(0.025, 6, 5), eyeMat);
+        eye.position.set(0, 0.04, 0.13);
+        moth.add(eye);
+        // Random spawn cell.
+        const spot = openCells[Math.floor(Math.random() * openCells.length)];
+        const wx = (spot[0] - GRID/2) * CELL + (Math.random()-0.5) * 2;
+        const wz = (spot[1] - GRID/2) * CELL + (Math.random()-0.5) * 2;
+        moth.position.set(wx, 1.6 + Math.random() * 0.6, wz);
+        levelGroup.add(moth);
+        moths.push({
+          mesh: moth, alive: true, hp: 1, poison: 0,
+          wL, wR,
+          vx: (Math.random()-0.5) * 1.2, vz: (Math.random()-0.5) * 1.2,
+          phase: Math.random() * Math.PI * 2,
+          biteTimer: 0,
+        });
+      }
       break;
     }
     case 'crops': {
@@ -2536,6 +2624,7 @@ addEventListener('keydown', e => {
   else if (e.code === 'Digit2') setWeapon('ak47');
   else if (e.code === 'Digit3') setWeapon('knife');
   else if (e.code === 'Digit4') setWeapon('rocket');
+  else if (e.code === 'Digit5') setWeapon('spray');
   else if (e.code === 'KeyQ') {
     const idx = WEAPON_ORDER.indexOf(player.weapon);
     setWeapon(WEAPON_ORDER[(idx + 1) % WEAPON_ORDER.length]);
@@ -2569,6 +2658,38 @@ function useWeapon() {
   if (w.kind === 'gun') fireGun();
   else if (w.kind === 'melee') trySwingKnife();
   else if (w.kind === 'rocket') fireRocket();
+  else if (w.kind === 'spray') sprayInsecticide();
+}
+
+function sprayInsecticide() {
+  const w = WEAPONS.spray;
+  // Visible mist puff
+  const mist = w.held.userData.mist;
+  if (mist) {
+    mist.material.opacity = 0.65;
+    mist.scale.set(1 + Math.random()*0.3, 1 + Math.random()*0.5, 1 + Math.random()*0.3);
+  }
+  // Hiss sound — quick low-volume burst
+  if (!sprayInsecticide._hissT || performance.now() - sprayInsecticide._hissT > 90) {
+    blip(2200 + Math.random()*400, 0.06, 0.04);
+    sprayInsecticide._hissT = performance.now();
+  }
+  if (!moths.length) return;
+  const camPos = controls.getObject().position;
+  const fwd = new THREE.Vector3();
+  camera.getWorldDirection(fwd);
+  for (const m of moths) {
+    if (!m.alive) continue;
+    const dx = m.mesh.position.x - camPos.x;
+    const dy = m.mesh.position.y - camPos.y;
+    const dz = m.mesh.position.z - camPos.z;
+    const dist = Math.hypot(dx, dy, dz);
+    if (dist > w.range) continue;
+    const dot = (dx*fwd.x + dy*fwd.y + dz*fwd.z) / Math.max(0.0001, dist);
+    if (dot < w.coneCos) continue;
+    m.poison = (m.poison ?? 0) + 0.06;
+    if (m.poison > 0.5) m.alive = false;
+  }
 }
 
 const _gunRay = new THREE.Raycaster();
@@ -3072,7 +3193,13 @@ function tick() {
   // Auto-fire for full-auto weapons while LMB is held
   const wActive = WEAPONS[player.weapon];
   if (player.mouseHeld && wActive && wActive.auto && controls.isLocked) {
-    fireGun();
+    if (wActive.kind === 'gun') fireGun();
+    else if (wActive.kind === 'spray') sprayInsecticide();
+  }
+  // Mist fades each frame (whether or not we sprayed).
+  if (WEAPONS.spray && WEAPONS.spray.held.userData.mist) {
+    const mm = WEAPONS.spray.held.userData.mist.material;
+    mm.opacity = Math.max(0, mm.opacity - dt * 4.5);
   }
 
   // Gun recoil + idle bob (animates whichever gun is held)
@@ -3379,6 +3506,92 @@ function tick() {
           say(line, 4);
           speak('旁白', line, { rate: 0.9, pitch: 0.6 });
           playStatic();
+        }
+      }
+    }
+  }
+
+  // Moths — flutter, chase player/companions, bite on contact, fall when killed.
+  if (moths.length) {
+    const pp = controls.getObject().position;
+    for (const m of moths) {
+      // Wing flap (always — even on dead moths look-of-fall is fine, but skip if dead).
+      if (m.alive) {
+        m.phase += dt * 22;
+        const flap = Math.sin(m.phase) * 1.0;
+        m.wL.rotation.y = 0.3 + flap;
+        m.wR.rotation.y = -0.3 - flap;
+      }
+
+      if (!m.alive) {
+        // Drop to the surface and lie there.
+        m.mesh.position.y = Math.max(1.08, m.mesh.position.y - dt * 1.8);
+        m.mesh.rotation.z += dt * 1.5;
+        continue;
+      }
+
+      // Steer toward the nearest target (player by default, or nearest companion if closer).
+      let tx = pp.x, ty = pp.y, tz = pp.z;
+      let bestD = (m.mesh.position.x - pp.x)**2 + (m.mesh.position.z - pp.z)**2;
+      for (const c of companions) {
+        if (!c.alive || !c.mesh) continue;
+        const d = (m.mesh.position.x - c.mesh.position.x)**2 + (m.mesh.position.z - c.mesh.position.z)**2;
+        if (d < bestD) {
+          bestD = d;
+          tx = c.mesh.position.x; ty = 1.6; tz = c.mesh.position.z;
+        }
+      }
+      const dx = tx - m.mesh.position.x;
+      const dz = tz - m.mesh.position.z;
+      const d = Math.hypot(dx, dz) || 1;
+      const homing = 1.6;
+      m.vx += (dx / d) * homing * dt + (Math.random()-0.5) * 1.6 * dt;
+      m.vz += (dz / d) * homing * dt + (Math.random()-0.5) * 1.6 * dt;
+      // Cap speed.
+      const sp = Math.hypot(m.vx, m.vz);
+      const maxSp = 2.4;
+      if (sp > maxSp) { m.vx = m.vx / sp * maxSp; m.vz = m.vz / sp * maxSp; }
+      m.mesh.position.x += m.vx * dt;
+      m.mesh.position.z += m.vz * dt;
+      m.mesh.position.y += Math.sin(m.phase * 0.4) * dt * 0.6;
+      // Keep within level + reasonable height.
+      const limit = (GRID/2)*CELL - 1;
+      m.mesh.position.x = Math.max(-limit, Math.min(limit, m.mesh.position.x));
+      m.mesh.position.z = Math.max(-limit, Math.min(limit, m.mesh.position.z));
+      m.mesh.position.y = Math.max(1.3, Math.min(2.4, m.mesh.position.y));
+      m.mesh.lookAt(tx, m.mesh.position.y, tz);
+
+      // Bite player.
+      m.biteTimer = Math.max(0, (m.biteTimer ?? 0) - dt);
+      const pdx = m.mesh.position.x - pp.x;
+      const pdy = m.mesh.position.y - pp.y;
+      const pdz = m.mesh.position.z - pp.z;
+      if (!player.dying && deathScreen.style.display !== 'flex' && pdx*pdx + pdy*pdy + pdz*pdz < 0.7*0.7) {
+        if (m.biteTimer <= 0) {
+          player.hp -= 0.05;
+          m.biteTimer = 0.6;
+          flashEl.style.background = '#603030';
+          flashEl.style.opacity = '0.25';
+          setTimeout(() => { flashEl.style.opacity = '0'; flashEl.style.background = '#000'; }, 100);
+        }
+      }
+      // Bite companions.
+      for (const c of companions) {
+        if (!c.alive || !c.mesh) continue;
+        const cdx = m.mesh.position.x - c.mesh.position.x;
+        const cdz = m.mesh.position.z - c.mesh.position.z;
+        if (cdx*cdx + cdz*cdz < 0.7*0.7) {
+          c.hp = (c.hp ?? 1) - dt * 0.25;
+          if (c.hp <= 0) {
+            c.alive = false;
+            leaveCorpse(c.mesh);
+            c.mesh = null;
+            playDeathCry(c);
+            const line = `${c.name} 被飞蛾啃噬倒下了……`;
+            say(line, 4);
+            speak('旁白', line, { rate: 0.85, pitch: 0.55 });
+            playStatic();
+          }
         }
       }
     }
