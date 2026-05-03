@@ -178,7 +178,6 @@
 import * as THREE from 'three';
 import { PointerLockControls } from 'three/addons/controls/PointerLockControls.js';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
-import { FBXLoader } from 'three/addons/loaders/FBXLoader.js';
 import * as SkeletonUtils from 'three/addons/utils/SkeletonUtils.js';
 
 // Refactored modules
@@ -658,10 +657,29 @@ let humanAnims = null;
 let humanLoaded = false;
 
 let soldierProto = null, soldierAnims = null, soldierLoaded = false;
-let girlProto = null,    girlAnims = null,    girlLoaded = false;
+let butterflyProto = null, butterflyLoaded = false;
 
 const _gltfLoader = new GLTFLoader();
 // 1) Soldier — used as the male/entity model.
+// Butterfly mesh by Hugo Gibson, hosted on Poly Pizza (CC-BY 3.0).
+// Reused as the flying-insect ("moth") on the swimming-pool level.
+_gltfLoader.load(
+  'https://static.poly.pizza/80046a70-4713-438e-8174-b0a4a0a22c7c.glb',
+  (gltf) => {
+    const root = gltf.scene;
+    // Normalize to a wingspan of ~0.45m so the bug reads at face-height.
+    const bbox = new THREE.Box3().setFromObject(root);
+    const size = new THREE.Vector3(); bbox.getSize(size);
+    const span = Math.max(size.x, size.z, 0.001);
+    const s = 0.45 / span;
+    root.scale.setScalar(s);
+    butterflyProto = root;
+    butterflyLoaded = true;
+  },
+  undefined,
+  (err) => console.warn('[gltf] butterfly load failed; falling back to procedural moth', err)
+);
+
 _gltfLoader.load(
   'https://threejs.org/examples/models/gltf/Soldier.glb',
   (gltf) => {
@@ -673,44 +691,15 @@ _gltfLoader.load(
     humanProto = gltf.scene;
     humanAnims = gltf.animations || [];
     humanLoaded = true;
-    console.log('[gltf] Soldier (male NPC) animations:', soldierAnims.map(a => a.name));
+    console.log('[gltf] Soldier animations:', soldierAnims.map(a => a.name));
     upgradeEntitiesToGLTF();
+    scheduleGLTFUpgrade();   // girls reuse the soldier rig with a feminine reskin
   },
   undefined,
   (err) => console.warn('[gltf] Soldier load failed', err)
 );
 
-// 2) Capoeira girl FBX (mudroljub/capoeira-girl on GitHub) — skinned
-//    humanoid female model. Pulled via jsDelivr's GitHub CDN for CORS.
-//    Model is in assets/fbx/model.fbx; animation in assets/fbx/Ginga.fbx.
-const _capoeiraBase = 'https://cdn.jsdelivr.net/gh/mudroljub/capoeira-girl@master/assets/fbx/';
-const _fbxLoader = new FBXLoader();
-_fbxLoader.load(
-  _capoeiraBase + 'model.fbx',
-  (model) => {
-    girlProto = model;
-    // Try to load a default animation (Ginga = the basic capoeira sway).
-    _fbxLoader.load(
-      _capoeiraBase + 'Ginga.fbx',
-      (anim) => {
-        girlAnims = anim.animations || [];
-        girlLoaded = true;
-        console.log('[fbx] Capoeira girl + Ginga loaded; clips:', girlAnims.map(a => a.name));
-        scheduleGLTFUpgrade();
-      },
-      undefined,
-      (err) => {
-        // Animation failed — still use the static model.
-        console.warn('[fbx] Ginga animation load failed; girls will be static', err);
-        girlAnims = model.animations || [];
-        girlLoaded = true;
-        scheduleGLTFUpgrade();
-      }
-    );
-  },
-  undefined,
-  (err) => console.warn('[fbx] Capoeira girl model load failed; staying procedural', err)
-);
+// (Girls reuse the Soldier.glb rig — see buildGLTFGirl below.)
 
 // ---- Feminine reskin attached to GLTF bones ----
 function attachFeminineReskin(bones, palette) {
@@ -877,41 +866,23 @@ function attachFeminineReskin(bones, palette) {
 }
 
 function buildGLTFGirl(palette, name) {
-  // Capoeira girl FBX (from mudroljub/capoeira-girl). Skinned humanoid
-  // female with a Ginga animation. SkeletonUtils.clone preserves the rig
-  // so each instance can play her own mixer.
-  if (!girlLoaded) return null;
-  const root = SkeletonUtils.clone(girlProto);
-  // FBX models are usually exported in centimetres — auto-rescale to ~1.7m.
-  const bbox = new THREE.Box3().setFromObject(root);
-  const h = bbox.max.y - bbox.min.y;
-  if (h > 0.001) {
-    const s = 1.7 / h;
-    root.scale.setScalar(s);
-    const bbox2 = new THREE.Box3().setFromObject(root);
-    root.position.y -= bbox2.min.y;
-  }
-  // Tint each material toward the dress colour so each girl has her own look.
-  const tint = new THREE.Color(palette.dressColor);
+  // Soldier.glb skeleton + feminine reskin: gives the girls a natural arms-down
+  // walking posture (Idle / Walk / Run from the soldier rig) instead of the
+  // arms-raised capoeira sway.
+  if (!soldierLoaded) return null;
+  const root = SkeletonUtils.clone(soldierProto);
+  // Hide the male soldier mesh — feminine geometry is added on the bones below.
+  root.traverse(o => { if (o.isMesh) o.visible = false; });
+  // Collect bones by normalised name (strip mixamorig: prefix, lowercase).
+  const bones = {};
   root.traverse(o => {
-    if (o.isMesh && o.material) {
-      const mats = Array.isArray(o.material) ? o.material : [o.material];
-      o.material = mats.map(m => {
-        const cm = m.clone();
-        if (cm.color) cm.color.lerp(tint, 0.25);
-        return cm;
-      });
-      if (o.material.length === 1) o.material = o.material[0];
-      o.castShadow = false;
-      o.frustumCulled = false;
-    }
+    if (!o.isBone) return;
+    const k = o.name.replace(/^mixamorig:?/i, '').toLowerCase();
+    if (!bones[k]) bones[k] = o;
   });
-  // Find the head bone for talking head-bob and bow attach
-  let headBone = null;
-  root.traverse(o => {
-    if (o.isBone && /head/i.test(o.name) && !headBone) headBone = o;
-  });
-  if (headBone) {
+  attachFeminineReskin(bones, palette);
+  // Hair-bow on the head bone for a feminine accent.
+  if (bones.head) {
     const bow = new THREE.Mesh(
       new THREE.TorusGeometry(0.10, 0.030, 8, 14),
       new THREE.MeshLambertMaterial({ color: palette.accentColor })
@@ -919,23 +890,20 @@ function buildGLTFGirl(palette, name) {
     bow.position.set(0.10, 0.20, -0.04);
     bow.rotation.x = Math.PI / 2;
     bow.scale.set(0.9, 0.9, 0.55);
-    headBone.add(bow);
+    bones.head.add(bow);
   }
-  // Animation mixer — the capoeira pack ships per-move clips. Use the first
-  // available clip as the active loop (we loaded Ginga at startup).
+  // Animation mixer — Soldier ships Idle / Walk / Run.
   const mixer = new THREE.AnimationMixer(root);
   let idleAct = null, walkAct = null, runAct = null;
-  for (const clip of girlAnims) {
-    if (/idle|ginga/i.test(clip.name))    idleAct = mixer.clipAction(clip);
-    else if (/walk/i.test(clip.name))      walkAct = mixer.clipAction(clip);
-    else if (/run/i.test(clip.name))       runAct  = mixer.clipAction(clip);
+  for (const clip of soldierAnims) {
+    if (/idle/i.test(clip.name))         idleAct = mixer.clipAction(clip);
+    else if (/^run$/i.test(clip.name))    runAct  = mixer.clipAction(clip);
+    else if (/walk/i.test(clip.name))     walkAct = mixer.clipAction(clip);
   }
-  if (!idleAct && girlAnims.length) idleAct = mixer.clipAction(girlAnims[0]);
-  if (!walkAct) walkAct = idleAct;
   if (idleAct) { idleAct.play(); idleAct.setEffectiveWeight(1); }
-  if (walkAct && walkAct !== idleAct) { walkAct.play(); walkAct.setEffectiveWeight(0); }
-  if (runAct && runAct !== walkAct && runAct !== idleAct) { runAct.play(); runAct.setEffectiveWeight(0); }
-  root.userData.gltf = { mixer, idleAct, walkAct, runAct, headBone, isGLTF: true };
+  if (walkAct) { walkAct.play(); walkAct.setEffectiveWeight(0); }
+  if (runAct)  { runAct.play();  runAct.setEffectiveWeight(0); }
+  root.userData.gltf = { mixer, idleAct, walkAct, runAct, headBone: bones.head, isGLTF: true };
   if (name) root.add(makeNameTag(name, palette.dressColor));
   return root;
 }
@@ -2081,9 +2049,9 @@ function buildLevel(n, opts = {}) {
 let _gltfUpgradeIdx = 0;
 function scheduleGLTFUpgrade() {
   _gltfUpgradeIdx = 0;
-  if (!girlLoaded) return;
+  if (!soldierLoaded) return;
   function step() {
-    if (!girlLoaded || !levelGroup) return;
+    if (!soldierLoaded || !levelGroup) return;
     const budget = 3;   // upgrade up to 3 figures per frame
     let done = 0;
     while (_gltfUpgradeIdx < companions.length && done < budget) {
@@ -2409,26 +2377,66 @@ function spawnProps(cfg, openCells) {
       }
 
       // Moths — fluttering hostile insects that drain hp on contact. Killable with insecticide.
+      // Visual: cloned butterfly GLB if available; falls back to a quick procedural build.
       const NUM_MOTHS = 8;
       for (let i = 0; i < NUM_MOTHS; i++) {
         const moth = new THREE.Group();
-        const bodyMat = new THREE.MeshLambertMaterial({ color: 0x554028 });
-        const wingMat = new THREE.MeshLambertMaterial({ color: 0xc8b890, transparent:true, opacity:0.85, side: THREE.DoubleSide });
-        const eyeMat = new THREE.MeshBasicMaterial({ color: 0xff6633 });
-        const body = new THREE.Mesh(new THREE.SphereGeometry(0.10, 6, 5), bodyMat);
-        body.scale.set(1, 0.6, 1.6);
-        moth.add(body);
-        const wL = new THREE.Mesh(new THREE.PlaneGeometry(0.45, 0.30), wingMat);
-        wL.position.set(0.22, 0.02, 0);
-        wL.rotation.y = 0.3;
-        moth.add(wL);
-        const wR = wL.clone();
-        wR.position.x = -0.22;
-        wR.rotation.y = -0.3;
-        moth.add(wR);
-        const eye = new THREE.Mesh(new THREE.SphereGeometry(0.025, 6, 5), eyeMat);
-        eye.position.set(0, 0.04, 0.13);
-        moth.add(eye);
+        let wL = null, wR = null;
+        if (butterflyLoaded && butterflyProto) {
+          const clone = butterflyProto.clone(true);
+          // Re-parent so we can flap wings around the body axis. Detect wing
+          // meshes by name; otherwise pick the two non-body meshes whose
+          // bounding boxes extend farthest along x.
+          const meshes = [];
+          clone.traverse(o => { if (o.isMesh) meshes.push(o); });
+          const named = meshes.filter(m => /wing/i.test(m.name));
+          let candidates = named.length >= 2 ? named : meshes;
+          // Score by |x-extent|.
+          const bboxOf = (m) => new THREE.Box3().setFromObject(m);
+          candidates = candidates.map(m => {
+            const bb = bboxOf(m);
+            const span = Math.max(Math.abs(bb.min.x), Math.abs(bb.max.x));
+            const cx = (bb.min.x + bb.max.x) * 0.5;
+            return { m, span, cx };
+          }).sort((a, b) => b.span - a.span);
+          const wingMeshes = candidates.slice(0, 2);
+          for (const { m, cx } of wingMeshes) {
+            // Wrap each wing in a pivot group at x=0 so rotation hinges at the body.
+            const pivot = new THREE.Group();
+            const parent = m.parent;
+            const localPos = m.position.clone();
+            parent.add(pivot);
+            pivot.add(m);
+            m.position.sub(new THREE.Vector3(localPos.x - localPos.x, 0, 0)); // keep mesh local pos
+            pivot.position.x = 0;
+            if (cx >= 0) wR = pivot; else wL = pivot;
+          }
+          // Tint slightly toward moth (warmer, dustier).
+          clone.traverse(o => {
+            if (o.isMesh && o.material && o.material.color) {
+              o.material = o.material.clone();
+              o.material.color.lerp(new THREE.Color(0xc8b890), 0.4);
+              if (o.material.side !== undefined) o.material.side = THREE.DoubleSide;
+            }
+          });
+          moth.add(clone);
+        } else {
+          const bodyMat = new THREE.MeshLambertMaterial({ color: 0x554028 });
+          const wingMat = new THREE.MeshLambertMaterial({ color: 0xc8b890, transparent:true, opacity:0.85, side: THREE.DoubleSide });
+          const body = new THREE.Mesh(new THREE.SphereGeometry(0.10, 6, 5), bodyMat);
+          body.scale.set(1, 0.6, 1.6);
+          moth.add(body);
+          wL = new THREE.Group();
+          const wingL = new THREE.Mesh(new THREE.PlaneGeometry(0.45, 0.30), wingMat);
+          wingL.position.x = 0.22;
+          wL.add(wingL);
+          moth.add(wL);
+          wR = new THREE.Group();
+          const wingR = new THREE.Mesh(new THREE.PlaneGeometry(0.45, 0.30), wingMat);
+          wingR.position.x = -0.22;
+          wR.add(wingR);
+          moth.add(wR);
+        }
         // Random spawn cell.
         const spot = openCells[Math.floor(Math.random() * openCells.length)];
         const wx = (spot[0] - GRID/2) * CELL + (Math.random()-0.5) * 2;
@@ -2655,6 +2663,7 @@ addEventListener('mouseup', e => {
 function useWeapon() {
   const w = WEAPONS[player.weapon];
   if (!w) return;
+  initAudio();   // ensure WebAudio context is running before any blip
   if (w.kind === 'gun') fireGun();
   else if (w.kind === 'melee') trySwingKnife();
   else if (w.kind === 'rocket') fireRocket();
@@ -3515,12 +3524,12 @@ function tick() {
   if (moths.length) {
     const pp = controls.getObject().position;
     for (const m of moths) {
-      // Wing flap (always — even on dead moths look-of-fall is fine, but skip if dead).
+      // Wing flap — hinge each wing pivot up/down at the body axis.
       if (m.alive) {
         m.phase += dt * 22;
         const flap = Math.sin(m.phase) * 1.0;
-        m.wL.rotation.y = 0.3 + flap;
-        m.wR.rotation.y = -0.3 - flap;
+        if (m.wL) m.wL.rotation.z =  flap;
+        if (m.wR) m.wR.rotation.z = -flap;
       }
 
       if (!m.alive) {

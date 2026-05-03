@@ -7,8 +7,12 @@ let audioCtx = null, hum = null, humGain = null;
 let lastHeart = 0;
 
 export function initAudio() {
-  if (audioCtx) return audioCtx;
+  if (audioCtx) {
+    if (audioCtx.state === 'suspended') audioCtx.resume().catch(() => {});
+    return audioCtx;
+  }
   audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+  if (audioCtx.state === 'suspended') audioCtx.resume().catch(() => {});
   hum = audioCtx.createOscillator();
   hum.type = 'sawtooth';
   hum.frequency.value = 60;
@@ -26,6 +30,7 @@ export function getHumGain()    { return humGain; }
 
 export function blip(freq, dur = 0.2, vol = 0.15) {
   if (!audioCtx) return;
+  if (audioCtx.state === 'suspended') audioCtx.resume().catch(() => {});
   const t = audioCtx.currentTime;
   const o = audioCtx.createOscillator();
   o.frequency.setValueAtTime(freq, t);
@@ -38,6 +43,7 @@ export function blip(freq, dur = 0.2, vol = 0.15) {
 
 export function playStatic() {
   if (!audioCtx) return;
+  if (audioCtx.state === 'suspended') audioCtx.resume().catch(() => {});
   const buf = audioCtx.createBuffer(1, audioCtx.sampleRate * 0.15, audioCtx.sampleRate);
   const d = buf.getChannelData(0);
   for (let i = 0; i < d.length; i++) d[i] = (Math.random() * 2 - 1) * 0.4;
