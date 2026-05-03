@@ -73,7 +73,7 @@
   <div class="bar"><div class="fill" id="staminaFill" style="width:100%"></div></div>
   <div style="margin-top:6px">理智 (Sanity)</div>
   <div class="bar"><div class="fill sanity" id="sanityFill" style="width:100%"></div></div>
-  <div style="margin-top:6px">生命 (HP)</div>
+  <div style="margin-top:6px">生命 (HP) <span id="hpNum" style="opacity:.85">10000 / 10000</span></div>
   <div class="bar"><div class="fill hp" id="hpFill" style="width:100%"></div></div>
   <div style="margin-top:8px" id="distance">行程：0 米</div>
 </div>
@@ -178,6 +178,7 @@
 import * as THREE from 'three';
 import { PointerLockControls } from 'three/addons/controls/PointerLockControls.js';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+import { FBXLoader } from 'three/addons/loaders/FBXLoader.js';
 import * as SkeletonUtils from 'three/addons/utils/SkeletonUtils.js';
 
 // Refactored modules
@@ -252,21 +253,26 @@ let rockets = [];             // active rocket projectiles
 let lights = [];
 let almonds = [];
 let knives = [];
+let medkits = [];          // first-aid pickups — restore HP on contact
 let entities = [];
 let electricZones = [];   // live-wire hazards on flooded levels — instant kill on contact
 let toxicZones = [];      // sickly-green water patches — slow damage on contact
 let boats = [];           // boardable boats on flooded levels
 let moths = [];           // fluttering moths — drain hp on contact, killable with insecticide
 let stairExit = null;
+let randomStair = null;    // bonus staircase that warps to a random other floor
 let elevator = null;
+let pool = null;           // sunken pool footprint on the swimming-pool level
+let guide = null;          // kind-stranger NPC that leads the player to the exit
 let currentLevel = 0;
 let cells = [];
 
 // ============================================================
 // Player + companions
 // ============================================================
+const MAX_HP = 10000;
 const player = {
-  hp: 1.0, sanity: 1.0, stamina: 1.0,
+  hp: MAX_HP, sanity: 1.0, stamina: 1.0,
   flashlightOn: false, flashlightBattery: 1.0,
   totalDist: 0,
   speedBoost: 0,
@@ -657,6 +663,7 @@ let humanAnims = null;
 let humanLoaded = false;
 
 let soldierProto = null, soldierAnims = null, soldierLoaded = false;
+let girlProto    = null, girlAnims    = null, girlLoaded    = false;
 let butterflyProto = null, butterflyLoaded = false;
 
 const _gltfLoader = new GLTFLoader();
@@ -693,13 +700,40 @@ _gltfLoader.load(
     humanLoaded = true;
     console.log('[gltf] Soldier animations:', soldierAnims.map(a => a.name));
     upgradeEntitiesToGLTF();
-    scheduleGLTFUpgrade();   // girls reuse the soldier rig with a feminine reskin
   },
   undefined,
   (err) => console.warn('[gltf] Soldier load failed', err)
 );
 
-// (Girls reuse the Soldier.glb rig — see buildGLTFGirl below.)
+// 2) Capoeira girl FBX (mudroljub/capoeira-girl on GitHub) — skinned
+//    humanoid female model. Pulled via jsDelivr's GitHub CDN for CORS.
+//    model.fbx is the base mesh; Ginga.fbx is the default sway animation.
+const _capoeiraBase = 'https://cdn.jsdelivr.net/gh/mudroljub/capoeira-girl@master/assets/fbx/';
+const _fbxLoader = new FBXLoader();
+_fbxLoader.load(
+  _capoeiraBase + 'model.fbx',
+  (model) => {
+    girlProto = model;
+    _fbxLoader.load(
+      _capoeiraBase + 'Ginga.fbx',
+      (anim) => {
+        girlAnims = anim.animations || [];
+        girlLoaded = true;
+        console.log('[fbx] Capoeira girl + Ginga loaded; clips:', girlAnims.map(a => a.name));
+        scheduleGLTFUpgrade();
+      },
+      undefined,
+      (err) => {
+        console.warn('[fbx] Ginga animation load failed; girls will be static', err);
+        girlAnims = model.animations || [];
+        girlLoaded = true;
+        scheduleGLTFUpgrade();
+      }
+    );
+  },
+  undefined,
+  (err) => console.warn('[fbx] Capoeira girl load failed; staying procedural', err)
+);
 
 // ---- Feminine reskin attached to GLTF bones ----
 function attachFeminineReskin(bones, palette) {
@@ -866,23 +900,39 @@ function attachFeminineReskin(bones, palette) {
 }
 
 function buildGLTFGirl(palette, name) {
-  // Soldier.glb skeleton + feminine reskin: gives the girls a natural arms-down
-  // walking posture (Idle / Walk / Run from the soldier rig) instead of the
-  // arms-raised capoeira sway.
-  if (!soldierLoaded) return null;
-  const root = SkeletonUtils.clone(soldierProto);
-  // Hide the male soldier mesh — feminine geometry is added on the bones below.
-  root.traverse(o => { if (o.isMesh) o.visible = false; });
-  // Collect bones by normalised name (strip mixamorig: prefix, lowercase).
-  const bones = {};
+  // Capoeira girl FBX (mudroljub/capoeira-girl). Skinned humanoid female with
+  // a Ginga sway animation. SkeletonUtils.clone preserves the rig so each
+  // instance can drive its own mixer.
+  if (!girlLoaded) return null;
+  const root = SkeletonUtils.clone(girlProto);
+  // FBX is exported in centimetres — auto-rescale to ~1.7m, feet at y=0.
+  const bbox = new THREE.Box3().setFromObject(root);
+  const h = bbox.max.y - bbox.min.y;
+  if (h > 0.001) {
+    root.scale.setScalar(1.7 / h);
+    const bbox2 = new THREE.Box3().setFromObject(root);
+    root.position.y -= bbox2.min.y;
+  }
+  // Tint each material toward the dress colour so each girl has her own look.
+  const tint = new THREE.Color(palette.dressColor);
   root.traverse(o => {
-    if (!o.isBone) return;
-    const k = o.name.replace(/^mixamorig:?/i, '').toLowerCase();
-    if (!bones[k]) bones[k] = o;
+    if (o.isMesh && o.material) {
+      const mats = Array.isArray(o.material) ? o.material : [o.material];
+      o.material = mats.map(m => {
+        const cm = m.clone();
+        if (cm.color) cm.color.lerp(tint, 0.25);
+        return cm;
+      });
+      if (o.material.length === 1) o.material = o.material[0];
+      o.castShadow = false;
+      o.frustumCulled = false;
+    }
   });
-  attachFeminineReskin(bones, palette);
-  // Hair-bow on the head bone for a feminine accent.
-  if (bones.head) {
+  let headBone = null;
+  root.traverse(o => {
+    if (o.isBone && /head/i.test(o.name) && !headBone) headBone = o;
+  });
+  if (headBone) {
     const bow = new THREE.Mesh(
       new THREE.TorusGeometry(0.10, 0.030, 8, 14),
       new THREE.MeshLambertMaterial({ color: palette.accentColor })
@@ -890,20 +940,22 @@ function buildGLTFGirl(palette, name) {
     bow.position.set(0.10, 0.20, -0.04);
     bow.rotation.x = Math.PI / 2;
     bow.scale.set(0.9, 0.9, 0.55);
-    bones.head.add(bow);
+    headBone.add(bow);
   }
-  // Animation mixer — Soldier ships Idle / Walk / Run.
+  // Animation mixer — capoeira pack ships per-move clips; treat Ginga as idle.
   const mixer = new THREE.AnimationMixer(root);
   let idleAct = null, walkAct = null, runAct = null;
-  for (const clip of soldierAnims) {
-    if (/idle/i.test(clip.name))         idleAct = mixer.clipAction(clip);
-    else if (/^run$/i.test(clip.name))    runAct  = mixer.clipAction(clip);
+  for (const clip of girlAnims) {
+    if (/idle|ginga/i.test(clip.name))   idleAct = mixer.clipAction(clip);
     else if (/walk/i.test(clip.name))     walkAct = mixer.clipAction(clip);
+    else if (/run/i.test(clip.name))      runAct  = mixer.clipAction(clip);
   }
+  if (!idleAct && girlAnims.length) idleAct = mixer.clipAction(girlAnims[0]);
+  if (!walkAct) walkAct = idleAct;
   if (idleAct) { idleAct.play(); idleAct.setEffectiveWeight(1); }
-  if (walkAct) { walkAct.play(); walkAct.setEffectiveWeight(0); }
-  if (runAct)  { runAct.play();  runAct.setEffectiveWeight(0); }
-  root.userData.gltf = { mixer, idleAct, walkAct, runAct, headBone: bones.head, isGLTF: true };
+  if (walkAct && walkAct !== idleAct) { walkAct.play(); walkAct.setEffectiveWeight(0); }
+  if (runAct && runAct !== walkAct && runAct !== idleAct) { runAct.play(); runAct.setEffectiveWeight(0); }
+  root.userData.gltf = { mixer, idleAct, walkAct, runAct, headBone, isGLTF: true };
   if (name) root.add(makeNameTag(name, palette.dressColor));
   return root;
 }
@@ -1684,7 +1736,7 @@ function disposeLevel() {
     }
   });
   levelGroup = null;
-  wallBoxes = []; lights = []; almonds = []; knives = []; entities = []; electricZones = []; toxicZones = []; boats = []; moths = []; stairExit = null; elevator = null;
+  wallBoxes = []; lights = []; almonds = []; knives = []; medkits = []; entities = []; electricZones = []; toxicZones = []; boats = []; moths = []; stairExit = null; randomStair = null; elevator = null; pool = null; guide = null;
   player.boat = null;
   wallMeshRef = null;
   rockets = [];
@@ -1701,6 +1753,12 @@ function buildLevel(n, opts = {}) {
   scene.add(levelGroup);
 
   buildLayout(cfg.layout);
+
+  // Pool level: define the sunken-pool footprint up front so floor / pickup /
+  // companion code can avoid placing things inside it.
+  if (cfg.props === 'water') {
+    pool = { x: 0, z: 0, halfX: 22, halfZ: 12, surfaceY: -0.20, bottomY: -1.6 };
+  }
 
   const wallTex   = makeNoiseTexture(128, cfg.wallRGB, 32, 2);
   const floorTex  = makeNoiseTexture(128, cfg.floorRGB, 50, GRID);
@@ -1734,9 +1792,31 @@ function buildLevel(n, opts = {}) {
   wallMeshRef = wallMesh;          // global handle for destroyWallsAt()
 
   const planeGeom = new THREE.PlaneGeometry(GRID*CELL, GRID*CELL);
-  const floor = new THREE.Mesh(planeGeom, floorMat);
-  floor.rotation.x = -Math.PI/2;
-  levelGroup.add(floor);
+  if (pool) {
+    // Build the deck as four strips around the pool footprint so the pool
+    // reads as a hole in the floor (instead of the pool sitting on top of it).
+    const half = (GRID/2) * CELL;
+    const stripGeoms = [
+      // North (z > +halfZ)
+      { sz: half - pool.halfZ, sx: 2 * half,                    cx: 0,                            cz: (pool.halfZ + half) / 2 },
+      // South (z < -halfZ)
+      { sz: half - pool.halfZ, sx: 2 * half,                    cx: 0,                            cz: -(pool.halfZ + half) / 2 },
+      // East (x > +halfX, between pool.z bounds)
+      { sz: 2 * pool.halfZ,    sx: half - pool.halfX,           cx: (pool.halfX + half) / 2,      cz: 0 },
+      // West
+      { sz: 2 * pool.halfZ,    sx: half - pool.halfX,           cx: -(pool.halfX + half) / 2,     cz: 0 },
+    ];
+    for (const g of stripGeoms) {
+      const strip = new THREE.Mesh(new THREE.PlaneGeometry(g.sx, g.sz), floorMat);
+      strip.rotation.x = -Math.PI / 2;
+      strip.position.set(g.cx, 0, g.cz);
+      levelGroup.add(strip);
+    }
+  } else {
+    const floor = new THREE.Mesh(planeGeom, floorMat);
+    floor.rotation.x = -Math.PI/2;
+    levelGroup.add(floor);
+  }
 
   if (cfg.hasCeiling) {
     const ceiling = new THREE.Mesh(planeGeom.clone(), ceilMat);
@@ -1774,15 +1854,22 @@ function buildLevel(n, opts = {}) {
       if (!cells[x][z].wall) openCells.push([x, z]);
 
   let spawnX = 0, spawnZ = 0;
-  outer: for (let r = 0; r < 5; r++) {
-    for (let dx = -r; dx <= r; dx++)
-      for (let dz = -r; dz <= r; dz++) {
-        const cx = Math.floor(GRID/2)+dx, cz = Math.floor(GRID/2)+dz;
-        if (cx>=0 && cz>=0 && cx<GRID && cz<GRID && !cells[cx][cz].wall) {
-          spawnX = (cx - GRID/2)*CELL; spawnZ = (cz - GRID/2)*CELL;
-          break outer;
+  if (pool) {
+    // Spawn well clear of the pool edge so you start on the deck looking at
+    // the pool, not inside it.
+    spawnX = 0;
+    spawnZ = pool.z + pool.halfZ + 10;
+  } else {
+    outer: for (let r = 0; r < 5; r++) {
+      for (let dx = -r; dx <= r; dx++)
+        for (let dz = -r; dz <= r; dz++) {
+          const cx = Math.floor(GRID/2)+dx, cz = Math.floor(GRID/2)+dz;
+          if (cx>=0 && cz>=0 && cx<GRID && cz<GRID && !cells[cx][cz].wall) {
+            spawnX = (cx - GRID/2)*CELL; spawnZ = (cz - GRID/2)*CELL;
+            break outer;
+          }
         }
-      }
+    }
   }
   controls.getObject().position.set(spawnX, 1.7, spawnZ);
   player.lastPos.copy(controls.getObject().position);
@@ -1805,7 +1892,14 @@ function buildLevel(n, opts = {}) {
   const almondCapGeom  = new THREE.CylinderGeometry(0.06, 0.06, 0.06, 10);
   const almondBodyMat  = new THREE.MeshBasicMaterial({ color: 0xf6e29a, transparent: true, opacity: 0.85 });
   const almondCapMat   = new THREE.MeshBasicMaterial({ color: 0x6b5018 });
-  const candidate = openCells.slice();
+  // Pickups + stair placement should avoid the sunken pool footprint.
+  const isOnDeck = ([cx, cz]) => {
+    if (!pool) return true;
+    const wx = (cx - GRID/2) * CELL, wz = (cz - GRID/2) * CELL;
+    return Math.abs(wx - pool.x) > pool.halfX + 1.0
+        || Math.abs(wz - pool.z) > pool.halfZ + 1.0;
+  };
+  const candidate = openCells.filter(isOnDeck);
   for (let i = 0; i < almondCount && candidate.length; i++) {
     const k = Math.floor(Math.random() * candidate.length);
     const [cx, cz] = candidate.splice(k, 1)[0];
@@ -1843,9 +1937,36 @@ function buildLevel(n, opts = {}) {
     }
   }
 
+  // First-aid medkits — restore HP on pickup. 2–4 per floor.
+  const medkitCount = 2 + Math.floor(Math.random() * 3);
+  for (let i = 0; i < medkitCount && candidate.length; i++) {
+    const k = Math.floor(Math.random() * candidate.length);
+    const [cx, cz] = candidate.splice(k, 1)[0];
+    const wx = (cx - GRID/2)*CELL + (Math.random()-0.5)*1.2;
+    const wz = (cz - GRID/2)*CELL + (Math.random()-0.5)*1.2;
+    const g = new THREE.Group();
+    const box = new THREE.Mesh(
+      new THREE.BoxGeometry(0.32, 0.20, 0.22),
+      new THREE.MeshLambertMaterial({ color: 0xf2f2f2 })
+    );
+    const crossMat = new THREE.MeshBasicMaterial({ color: 0xd03030 });
+    const crossV = new THREE.Mesh(new THREE.BoxGeometry(0.06, 0.16, 0.005), crossMat);
+    const crossH = new THREE.Mesh(new THREE.BoxGeometry(0.16, 0.06, 0.005), crossMat);
+    crossV.position.set(0, 0, 0.114);
+    crossH.position.set(0, 0, 0.114);
+    g.add(box); g.add(crossV); g.add(crossH);
+    g.position.set(wx, 0.20, wz);
+    levelGroup.add(g);
+    const glow = new THREE.PointLight(0xffd0d0, 0.4, 2.0, 2);
+    glow.position.set(wx, 0.55, wz);
+    levelGroup.add(glow);
+    medkits.push({ mesh: g, glow, alive: true, baseY: 0.20, seed: Math.random()*Math.PI*2 });
+  }
+
   // Stair exit at far corner
   let exitCell = null, bestDist = -1;
   for (const [cx, cz] of openCells) {
+    if (!isOnDeck([cx, cz])) continue;
     const wx = (cx - GRID/2)*CELL, wz = (cz - GRID/2)*CELL;
     const d = (wx-spawnX)*(wx-spawnX) + (wz-spawnZ)*(wz-spawnZ);
     if (d > bestDist) { bestDist = d; exitCell = [cx, cz]; }
@@ -1889,6 +2010,67 @@ function buildLevel(n, opts = {}) {
     stair.position.set(wx, 0, wz);
     levelGroup.add(stair);
     stairExit = { mesh: stair, pos: new THREE.Vector3(wx, 0, wz), pillar, isFinal };
+  }
+
+  // Bonus stair — warps to a random *other* floor. Placed far from spawn and
+  // from the regular exit so the player can tell them apart.
+  let randCell = null, randBest = -Infinity;
+  for (const [cx, cz] of openCells) {
+    if (!isOnDeck([cx, cz])) continue;
+    const wx = (cx - GRID/2)*CELL, wz = (cz - GRID/2)*CELL;
+    const dSpawn = (wx-spawnX)*(wx-spawnX) + (wz-spawnZ)*(wz-spawnZ);
+    if (dSpawn < 25) continue;
+    if (stairExit) {
+      const sx = wx - stairExit.pos.x, sz = wz - stairExit.pos.z;
+      if (sx*sx + sz*sz < 49) continue;     // ≥7m from the regular stair
+    }
+    // Score: prefer cells that are far from BOTH spawn and the regular stair.
+    let score = dSpawn;
+    if (stairExit) {
+      const sx = wx - stairExit.pos.x, sz = wz - stairExit.pos.z;
+      score = Math.min(dSpawn, sx*sx + sz*sz);
+    }
+    if (score > randBest) { randBest = score; randCell = [cx, cz]; }
+  }
+  if (randCell) {
+    const [cx, cz] = randCell;
+    const wx = (cx - GRID/2)*CELL, wz = (cz - GRID/2)*CELL;
+    const stair = new THREE.Group();
+    const stepMat = new THREE.MeshLambertMaterial({ color: 0x2a2438 });
+    const stepCount = 6, stepW = 1.6, stepH = 0.18, stepD = 0.35;
+    for (let i = 0; i < stepCount; i++) {
+      const step = new THREE.Mesh(new THREE.BoxGeometry(stepW, stepH, stepD), stepMat);
+      step.position.set(0, -i * stepH + stepH/2, -i * stepD - stepD/2);
+      stair.add(step);
+    }
+    const pit = new THREE.Mesh(
+      new THREE.BoxGeometry(stepW + 0.1, 0.05, stepD * stepCount),
+      new THREE.MeshBasicMaterial({ color: 0x000000 })
+    );
+    pit.position.set(0, -stepCount * stepH - 0.02, -stepD * stepCount / 2 - stepD/2);
+    stair.add(pit);
+    const railMat = new THREE.MeshLambertMaterial({ color: 0x382a4a });
+    for (const sx of [-stepW/2 - 0.05, stepW/2 + 0.05]) {
+      const rail = new THREE.Mesh(
+        new THREE.BoxGeometry(0.08, 1.0, stepD * stepCount + 0.1), railMat
+      );
+      rail.position.set(sx, 0.4, -stepD * stepCount / 2 - stepD/2);
+      stair.add(rail);
+    }
+    // Distinct purple pulsing pillar so it reads as "the random stair".
+    const pillar = new THREE.Mesh(
+      new THREE.BoxGeometry(0.25, 2.0, 0.25),
+      new THREE.MeshBasicMaterial({ color: 0xb86bff })
+    );
+    pillar.position.set(0, 1.0, 0.4);
+    stair.add(pillar);
+    const rsLight = new THREE.PointLight(0xc080ff, 1.8, 8, 2);
+    rsLight.position.set(0, 1.8, 0);
+    stair.add(rsLight);
+    stair.rotation.y = Math.atan2(-wx, -wz);
+    stair.position.set(wx, 0, wz);
+    levelGroup.add(stair);
+    randomStair = { mesh: stair, pos: new THREE.Vector3(wx, 0, wz), pillar };
   }
 
   // ---------- Elevator (corner placement, animated entry) ----------
@@ -1979,6 +2161,52 @@ function buildLevel(n, opts = {}) {
     };
   }
 
+  // ---------- Guide NPC: a kind stranger who leads the player to the exit ----------
+  if (stairExit) {
+    let gCell = null, gBest = -Infinity;
+    for (const [cx, cz] of openCells) {
+      if (!isOnDeck([cx, cz])) continue;
+      const wx = (cx - GRID/2)*CELL, wz = (cz - GRID/2)*CELL;
+      const dSpawn = (wx-spawnX)*(wx-spawnX) + (wz-spawnZ)*(wz-spawnZ);
+      if (dSpawn < 49) continue;          // ≥7m from spawn
+      const sx = wx - stairExit.pos.x, sz = wz - stairExit.pos.z;
+      const dExit = sx*sx + sz*sz;
+      if (dExit < 36) continue;           // ≥6m from exit (so they have somewhere to lead)
+      // Score: prefer cells roughly midway between spawn and exit.
+      const score = Math.min(dSpawn, dExit);
+      if (score > gBest) { gBest = score; gCell = [cx, cz]; }
+    }
+    if (gCell) {
+      const [cx, cz] = gCell;
+      const wx = (cx - GRID/2)*CELL, wz = (cz - GRID/2)*CELL;
+      const mesh = buildProceduralCompanion(0xf6f1d8, 0xb89060);
+      mesh.add(makeNameTag('好心人', 0xfff0a0));
+      mesh.position.set(wx, 0, wz);
+      mesh.rotation.y = Math.random() * Math.PI * 2;
+      const haloRing = new THREE.Mesh(
+        new THREE.TorusGeometry(0.32, 0.04, 8, 24),
+        new THREE.MeshBasicMaterial({ color: 0xffe070 })
+      );
+      haloRing.rotation.x = Math.PI / 2;
+      haloRing.position.y = 2.0;
+      mesh.add(haloRing);
+      const haloLight = new THREE.PointLight(0xffd070, 1.6, 6, 2);
+      haloLight.position.set(0, 1.8, 0);
+      mesh.add(haloLight);
+      levelGroup.add(mesh);
+      guide = {
+        mesh, haloRing, haloLight,
+        cell: [cx, cz],
+        pos: new THREE.Vector3(wx, 0, wz),
+        alive: true,
+        leading: false, arrived: false, greeted: false,
+        path: null, pathIdx: 0, stuckTimer: 0,
+        lineCooldown: 4,
+        walkPhase: 0, bobSeed: Math.random()*Math.PI*2,
+      };
+    }
+  }
+
   spawnProps(cfg, openCells);
 
   const numEntities = 3;
@@ -2049,9 +2277,9 @@ function buildLevel(n, opts = {}) {
 let _gltfUpgradeIdx = 0;
 function scheduleGLTFUpgrade() {
   _gltfUpgradeIdx = 0;
-  if (!soldierLoaded) return;
+  if (!girlLoaded) return;
   function step() {
-    if (!soldierLoaded || !levelGroup) return;
+    if (!girlLoaded || !levelGroup) return;
     const budget = 3;   // upgrade up to 3 figures per frame
     let done = 0;
     while (_gltfUpgradeIdx < companions.length && done < budget) {
@@ -2236,32 +2464,154 @@ function spawnProps(cfg, openCells) {
       break;
     }
     case 'water': {
-      // Whole level is flooded — player wades through it.
-      const planeGeo = new THREE.PlaneGeometry(GRID*CELL, GRID*CELL);
-      // Bottom tint just above the floor (cheap caustic look).
-      const bottom = new THREE.Mesh(
-        planeGeo,
-        new THREE.MeshBasicMaterial({ color: 0x2a78a0, transparent:true, opacity:0.55 })
-      );
-      bottom.rotation.x = -Math.PI/2;
-      bottom.position.y = 0.04;
-      levelGroup.add(bottom);
-      // Surface — translucent, drawn from both sides so it's visible underwater too.
-      const surface = new THREE.Mesh(
-        planeGeo.clone(),
-        new THREE.MeshBasicMaterial({ color: 0x9fdcef, transparent:true, opacity:0.35, side: THREE.DoubleSide, depthWrite:false })
-      );
-      surface.rotation.x = -Math.PI/2;
-      surface.position.y = 1.05;   // ~waist-deep on a 1.7m camera
-      levelGroup.add(surface);
+      // Sunken indoor pool — single big rectangular pit cut into a tiled deck.
+      // The deck strips around the pool are built in buildLevel; here we add
+      // pool walls, pool bottom, dark water, white pillars, handrails, and a
+      // dense fluorescent ceiling grid.
+      if (!pool) break;
 
-      // Live wires dropped into the water — visible sparking patches that
-      // electrocute anything that wades into them.
-      const hazardCells = pick(6);
-      for (const [cx, cz] of hazardCells) {
-        const wx = (cx - GRID/2) * CELL + (Math.random()-0.5) * 1.2;
-        const wz = (cz - GRID/2) * CELL + (Math.random()-0.5) * 1.2;
+      const tileLightTex = makeNoiseTexture(128, [232, 234, 236], 12, 6);
+      const tileFloorTex = makeNoiseTexture(128, [110, 130, 140], 16, 4);
+      const tileMat   = new THREE.MeshLambertMaterial({ map: tileLightTex, side: THREE.DoubleSide });
+      const tileBot   = new THREE.MeshLambertMaterial({ map: tileFloorTex });
 
+      const innerW = pool.halfX * 2;
+      const innerD = pool.halfZ * 2;
+      const wallH  = -pool.bottomY;     // 1.6
+
+      // Pool bottom (slightly darker tile).
+      const poolBottom = new THREE.Mesh(
+        new THREE.PlaneGeometry(innerW, innerD), tileBot
+      );
+      poolBottom.rotation.x = -Math.PI / 2;
+      poolBottom.position.set(pool.x, pool.bottomY, pool.z);
+      levelGroup.add(poolBottom);
+
+      // Four pool walls — vertical planes facing into the pool.
+      const wallNS = new THREE.PlaneGeometry(innerW, wallH);
+      const wallEW = new THREE.PlaneGeometry(innerD, wallH);
+      const sides = [
+        // North (z = +halfZ, normal -z)
+        { geo: wallNS, x: pool.x, z: pool.z + pool.halfZ, ry: Math.PI },
+        // South (z = -halfZ, normal +z)
+        { geo: wallNS, x: pool.x, z: pool.z - pool.halfZ, ry: 0 },
+        // East (x = +halfX, normal -x)
+        { geo: wallEW, x: pool.x + pool.halfX, z: pool.z, ry: -Math.PI / 2 },
+        // West (x = -halfX, normal +x)
+        { geo: wallEW, x: pool.x - pool.halfX, z: pool.z, ry: Math.PI / 2 },
+      ];
+      for (const s of sides) {
+        const w = new THREE.Mesh(s.geo, tileMat);
+        w.position.set(s.x, pool.bottomY + wallH / 2, s.z);
+        w.rotation.y = s.ry;
+        levelGroup.add(w);
+      }
+
+      // Translucent pool water — dim teal, not opaque, so the pool bottom is
+      // still readable through it.
+      const water = new THREE.Mesh(
+        new THREE.PlaneGeometry(innerW, innerD),
+        new THREE.MeshBasicMaterial({
+          color: 0x4a7f8c, transparent: true, opacity: 0.55,
+          side: THREE.DoubleSide, depthWrite: false,
+        })
+      );
+      water.rotation.x = -Math.PI / 2;
+      water.position.set(pool.x, pool.surfaceY, pool.z);
+      levelGroup.add(water);
+
+      // White square pillars on the deck — at the pool corners and midpoints.
+      const pillarMat = new THREE.MeshLambertMaterial({ map: tileLightTex });
+      const pillarSide = 1.2;
+      const pillarGeom = new THREE.BoxGeometry(pillarSide, WALL_HEIGHT, pillarSide);
+      const off = 2.0;   // distance from pool edge to pillar center
+      const deckPillarPos = [
+        // Long-side pillars (north & south of pool)
+        [-pool.halfX + 4, +pool.halfZ + off],
+        [ 0,              +pool.halfZ + off],
+        [+pool.halfX - 4, +pool.halfZ + off],
+        [-pool.halfX + 4, -pool.halfZ - off],
+        [ 0,              -pool.halfZ - off],
+        [+pool.halfX - 4, -pool.halfZ - off],
+        // Short-side pillars (east & west of pool)
+        [+pool.halfX + off, 0],
+        [-pool.halfX - off, 0],
+      ];
+      for (const [px, pz] of deckPillarPos) {
+        const p = new THREE.Mesh(pillarGeom, pillarMat);
+        p.position.set(px, WALL_HEIGHT / 2, pz);
+        levelGroup.add(p);
+        wallBoxes.push({ x: px, z: pz, half: pillarSide / 2 });
+      }
+
+      // Metal handrails along the four pool edges.
+      const railMat = new THREE.MeshLambertMaterial({ color: 0x9aa0a6, emissive: 0x202020 });
+      const railR = 0.05;
+      const railH = 0.95;
+      const railOff = 0.25;
+      function addRail(x1, z1, x2, z2) {
+        const dx = x2 - x1, dz = z2 - z1;
+        const len = Math.hypot(dx, dz);
+        const r = new THREE.Mesh(
+          new THREE.CylinderGeometry(railR, railR, len, 8), railMat
+        );
+        r.position.set((x1 + x2) / 2, railH, (z1 + z2) / 2);
+        r.rotation.z = Math.PI / 2;
+        r.rotation.y = -Math.atan2(dz, dx);
+        levelGroup.add(r);
+      }
+      // Posts — short verticals at each rail corner.
+      const postGeom = new THREE.CylinderGeometry(0.04, 0.04, railH, 8);
+      function addPost(x, z) {
+        const p = new THREE.Mesh(postGeom, railMat);
+        p.position.set(x, railH / 2, z);
+        levelGroup.add(p);
+      }
+      const x0 = pool.x - pool.halfX - railOff;
+      const x1 = pool.x + pool.halfX + railOff;
+      const z0 = pool.z - pool.halfZ - railOff;
+      const z1 = pool.z + pool.halfZ + railOff;
+      addRail(x0, z0, x1, z0);
+      addRail(x0, z1, x1, z1);
+      addRail(x0, z0, x0, z1);
+      addRail(x1, z0, x1, z1);
+      // Posts every ~4m along the long sides + corners on the short sides.
+      for (let xx = x0; xx <= x1 + 0.01; xx += 4) {
+        addPost(xx, z0); addPost(xx, z1);
+      }
+      addPost(x0, z0); addPost(x0, z1); addPost(x1, z0); addPost(x1, z1);
+
+      // Dense rectangular fluorescent ceiling panels in a regular grid.
+      const flMat = new THREE.MeshBasicMaterial({ color: 0xeaffff });
+      const flGeom = new THREE.BoxGeometry(2.2, 0.04, 0.5);
+      const flStep = 6;
+      const flLimit = (GRID / 2) * CELL - 4;
+      for (let xx = -flLimit; xx <= flLimit + 0.01; xx += flStep) {
+        for (let zz = -flLimit; zz <= flLimit + 0.01; zz += flStep) {
+          const fl = new THREE.Mesh(flGeom, flMat);
+          fl.position.set(xx, WALL_HEIGHT - 0.05, zz);
+          levelGroup.add(fl);
+          const li = new THREE.PointLight(0xfff8e8, 0.95, 12, 1.4);
+          li.position.set(xx, WALL_HEIGHT - 0.2, zz);
+          levelGroup.add(li);
+          lights.push({ light: li, panel: fl, base: 0.95, seed: Math.random()*100, broken: Math.random() < 0.05 });
+        }
+      }
+
+      // Live wires dropped into the pool — sparking cables hanging from above.
+      const inPoolPick = (n) => {
+        const out = [];
+        for (let i = 0; i < n; i++) {
+          out.push([
+            pool.x + (Math.random() - 0.5) * 2 * (pool.halfX - 1.5),
+            pool.z + (Math.random() - 0.5) * 2 * (pool.halfZ - 1.5),
+          ]);
+        }
+        return out;
+      };
+
+      const surfY = pool.surfaceY;
+      for (const [wx, wz] of inPoolPick(3)) {
         const zoneGroup = new THREE.Group();
         zoneGroup.position.set(wx, 0, wz);
 
@@ -2271,26 +2621,27 @@ function spawnProps(cfg, openCells) {
           new THREE.MeshBasicMaterial({ color: 0xeaffff, transparent:true, opacity:0.55, side: THREE.DoubleSide, depthWrite:false })
         );
         disc.rotation.x = -Math.PI/2;
-        disc.position.y = 1.06;
+        disc.position.y = surfY + 0.02;
         zoneGroup.add(disc);
 
-        // Frayed cable dangling into the water from above.
+        // Frayed cable hanging from ceiling down into the pool water.
+        const cableLen = WALL_HEIGHT - surfY;
         const cable = new THREE.Mesh(
-          new THREE.CylinderGeometry(0.04, 0.04, 2.0, 6),
+          new THREE.CylinderGeometry(0.04, 0.04, cableLen, 6),
           new THREE.MeshLambertMaterial({ color: 0x202020 })
         );
-        cable.position.y = 2.0;
+        cable.position.y = surfY + cableLen / 2;
         zoneGroup.add(cable);
         const plug = new THREE.Mesh(
           new THREE.SphereGeometry(0.12, 8, 6),
           new THREE.MeshBasicMaterial({ color: 0xffffff })
         );
-        plug.position.y = 1.05;
+        plug.position.y = surfY;
         zoneGroup.add(plug);
 
         // Cyan-white spark light pulses from the contact point.
         const sparkLight = new THREE.PointLight(0xaaffff, 1.4, 5, 2);
-        sparkLight.position.y = 1.2;
+        sparkLight.position.y = surfY + 0.15;
         zoneGroup.add(sparkLight);
 
         levelGroup.add(zoneGroup);
@@ -2301,84 +2652,40 @@ function spawnProps(cfg, openCells) {
         });
       }
 
-      // Toxic water — sickly-green bubbling patches that slowly damage anything wading through.
-      const toxicCells = pick(5);
-      for (const [cx, cz] of toxicCells) {
-        const wx = (cx - GRID/2) * CELL + (Math.random()-0.5) * 1.0;
-        const wz = (cz - GRID/2) * CELL + (Math.random()-0.5) * 1.0;
+      // Toxic patches — a couple bubbling green slicks floating in the pool.
+      for (const [wx, wz] of inPoolPick(2)) {
         const tg = new THREE.Group();
         tg.position.set(wx, 0, wz);
         const slime = new THREE.Mesh(
-          new THREE.CircleGeometry(2.0, 28),
+          new THREE.CircleGeometry(1.6, 28),
           new THREE.MeshBasicMaterial({ color: 0x6fbf3a, transparent:true, opacity:0.7, side: THREE.DoubleSide, depthWrite:false })
         );
         slime.rotation.x = -Math.PI/2;
-        slime.position.y = 1.07;
+        slime.position.y = surfY + 0.03;
         tg.add(slime);
-        // Bubble cluster — small spheres bobbing on the surface.
         const bubbleMat = new THREE.MeshBasicMaterial({ color: 0xa8e070, transparent:true, opacity:0.8 });
         const bubbles = [];
-        for (let b = 0; b < 7; b++) {
+        for (let b = 0; b < 6; b++) {
           const ang = Math.random() * Math.PI * 2;
-          const rad = Math.random() * 1.6;
-          const s = 0.08 + Math.random() * 0.12;
+          const rad = Math.random() * 1.3;
+          const s = 0.07 + Math.random() * 0.10;
           const sph = new THREE.Mesh(new THREE.SphereGeometry(s, 6, 6), bubbleMat);
-          sph.position.set(Math.cos(ang) * rad, 1.1, Math.sin(ang) * rad);
+          sph.position.set(Math.cos(ang) * rad, surfY + 0.08, Math.sin(ang) * rad);
           tg.add(sph);
-          bubbles.push({ mesh: sph, baseY: 1.1, seed: Math.random() * Math.PI * 2 });
+          bubbles.push({ mesh: sph, baseY: surfY + 0.08, seed: Math.random() * Math.PI * 2 });
         }
         const glow = new THREE.PointLight(0x9fff66, 0.6, 4, 2);
-        glow.position.y = 1.4;
+        glow.position.y = surfY + 0.35;
         tg.add(glow);
         levelGroup.add(tg);
-        toxicZones.push({ x: wx, z: wz, r: 2.0, slime, bubbles, glow });
+        toxicZones.push({ x: wx, z: wz, r: 1.6, slime, bubbles, glow });
       }
 
-      // Wooden rowboats — board with E to glide over hazards safely.
-      const boatCells = pick(2);
-      for (const [cx, cz] of boatCells) {
-        const wx = (cx - GRID/2) * CELL;
-        const wz = (cz - GRID/2) * CELL;
-        const boat = new THREE.Group();
-        const woodMat = new THREE.MeshLambertMaterial({ color: 0x6b3a1a });
-        const trimMat = new THREE.MeshLambertMaterial({ color: 0x4a2810 });
-        // Hull (flattened box).
-        const hull = new THREE.Mesh(new THREE.BoxGeometry(1.4, 0.35, 2.8), woodMat);
-        hull.position.y = 1.05;
-        boat.add(hull);
-        // Inner well (slightly darker).
-        const well = new THREE.Mesh(new THREE.BoxGeometry(1.05, 0.2, 2.4), trimMat);
-        well.position.y = 1.20;
-        boat.add(well);
-        // Bow + stern bevels.
-        const bow = new THREE.Mesh(new THREE.ConeGeometry(0.7, 0.7, 4), woodMat);
-        bow.rotation.x = Math.PI / 2;
-        bow.rotation.z = Math.PI / 4;
-        bow.position.set(0, 1.05, 1.55);
-        boat.add(bow);
-        const stern = bow.clone();
-        stern.position.z = -1.55;
-        stern.rotation.x = -Math.PI / 2;
-        boat.add(stern);
-        // Bench seat.
-        const bench = new THREE.Mesh(new THREE.BoxGeometry(1.0, 0.08, 0.35), trimMat);
-        bench.position.y = 1.32;
-        boat.add(bench);
-        // Oar.
-        const oar = new THREE.Mesh(new THREE.CylinderGeometry(0.04, 0.04, 1.6, 6), woodMat);
-        oar.rotation.z = Math.PI / 2;
-        oar.position.set(0.7, 1.30, 0.2);
-        boat.add(oar);
+      // Boats removed: the redesigned pool is small + hazards are localised,
+      // so wading is the intended traversal mode.
 
-        boat.position.set(wx, 0, wz);
-        boat.rotation.y = Math.random() * Math.PI * 2;
-        levelGroup.add(boat);
-        boats.push({ mesh: boat, x: wx, z: wz, yaw: boat.rotation.y, occupied: false });
-      }
-
-      // Moths — fluttering hostile insects that drain hp on contact. Killable with insecticide.
-      // Visual: cloned butterfly GLB if available; falls back to a quick procedural build.
-      const NUM_MOTHS = 8;
+      // Moths disabled per request — keep code path but spawn zero.
+      const NUM_MOTHS = 0;
       for (let i = 0; i < NUM_MOTHS; i++) {
         const moth = new THREE.Group();
         let wL = null, wR = null;
@@ -2437,18 +2744,54 @@ function spawnProps(cfg, openCells) {
           wR.add(wingR);
           moth.add(wR);
         }
-        // Random spawn cell.
-        const spot = openCells[Math.floor(Math.random() * openCells.length)];
-        const wx = (spot[0] - GRID/2) * CELL + (Math.random()-0.5) * 2;
-        const wz = (spot[1] - GRID/2) * CELL + (Math.random()-0.5) * 2;
-        moth.position.set(wx, 1.6 + Math.random() * 0.6, wz);
+        // Pick an open cell with at least one adjacent wall — perch the moth
+        // on that wall. Falls back to a free position if no wall is found.
+        let perchX = 0, perchZ = 0, perchY = 1.7, perchYaw = 0;
+        let placed = false;
+        for (let tries = 0; tries < 24 && !placed; tries++) {
+          const spot = openCells[Math.floor(Math.random() * openCells.length)];
+          const sx = spot[0], sz = spot[1];
+          const dirs = [[1,0],[-1,0],[0,1],[0,-1]];
+          // Shuffle directions.
+          for (let i = dirs.length - 1; i > 0; i--) {
+            const j = Math.floor(Math.random() * (i + 1));
+            [dirs[i], dirs[j]] = [dirs[j], dirs[i]];
+          }
+          for (const [dx, dz] of dirs) {
+            const nx = sx + dx, nz = sz + dz;
+            if (nx < 0 || nx >= GRID || nz < 0 || nz >= GRID) continue;
+            if (!cells[nx][nz].wall) continue;
+            // Push the moth from the open cell toward the wall — sit just shy
+            // of the wall surface so it visually rests against it.
+            const cellCx = (sx - GRID/2) * CELL;
+            const cellCz = (sz - GRID/2) * CELL;
+            perchX = cellCx + dx * (CELL * 0.42);
+            perchZ = cellCz + dz * (CELL * 0.42);
+            perchY = 1.4 + Math.random() * 1.2;
+            // Face outward, away from the wall.
+            perchYaw = Math.atan2(-dx, -dz);
+            placed = true;
+            break;
+          }
+        }
+        if (!placed) {
+          const spot = openCells[Math.floor(Math.random() * openCells.length)];
+          perchX = (spot[0] - GRID/2) * CELL + (Math.random()-0.5) * 2;
+          perchZ = (spot[1] - GRID/2) * CELL + (Math.random()-0.5) * 2;
+          perchY = 1.6 + Math.random() * 0.6;
+          perchYaw = Math.random() * Math.PI * 2;
+        }
+        moth.position.set(perchX, perchY, perchZ);
+        moth.rotation.y = perchYaw;
         levelGroup.add(moth);
         moths.push({
           mesh: moth, alive: true, hp: 1, poison: 0,
           wL, wR,
-          vx: (Math.random()-0.5) * 1.2, vz: (Math.random()-0.5) * 1.2,
+          vx: 0, vz: 0,
           phase: Math.random() * Math.PI * 2,
           biteTimer: 0,
+          perchX, perchZ, perchY, perchYaw,
+          alerted: false,
         });
       }
       break;
@@ -2886,7 +3229,7 @@ function explode(pos) {
   const playerPos = controls.getObject().position;
   const pd = playerPos.distanceTo(pos);
   if (pd < radius) {
-    player.hp -= 0.6 * (1 - pd / radius);
+    player.hp -= 4000 * (1 - pd / radius);   // rocket self-blast: up to 4000
   }
   // Knock walls down
   destroyWallsAt(pos, radius);
@@ -2993,6 +3336,20 @@ function tryInteract() {
       say('下楼……');
       speak('旁白', '下楼');
       setTimeout(() => buildLevel(currentLevel + 1), 600);
+      return;
+    }
+  }
+  if (randomStair) {
+    const dx = p.x - randomStair.pos.x, dz = p.z - randomStair.pos.z;
+    if (dx*dx + dz*dz < 1.6*1.6) {
+      const others = [];
+      for (let i = 0; i < LEVELS.length; i++) if (i !== currentLevel) others.push(i);
+      if (!others.length) return;
+      const target = others[Math.floor(Math.random() * others.length)];
+      blip(540, 0.25, 0.2); blip(820, 0.3, 0.18); blip(1180, 0.35, 0.16);
+      say(`随机楼层…… ${LEVELS[target].name}`, 2);
+      speak('旁白', '随机楼层');
+      setTimeout(() => buildLevel(target), 700);
     }
   }
 }
@@ -3032,7 +3389,7 @@ controls.addEventListener('unlock', () => {
 });
 
 function resetAll() {
-  player.hp = 1; player.sanity = 1; player.stamina = 1;
+  player.hp = MAX_HP; player.sanity = 1; player.stamina = 1;
   player.flashlightBattery = 1; player.flashlightOn = false;
   player.totalDist = 0; player.speedBoost = 0; player.almondsCollected = 0;
   player.hasKnife = true; player.knifeSwing = 0;
@@ -3046,6 +3403,41 @@ function resetAll() {
   setWeapon('pistol');
   for (const c of companions) { c.hp = 1; c.alive = true; }
   buildLevel(0);
+}
+
+// ============================================================
+// Pathfinding (BFS over the cell grid) — used by the Guide NPC.
+// ============================================================
+function findPathBFS(sx, sz, gx, gz) {
+  if (!cells || !cells[sx] || !cells[gx]) return null;
+  if (cells[sx][sz].wall || cells[gx][gz].wall) return null;
+  if (sx === gx && sz === gz) return [[sx, sz]];
+  const visited = Array.from({length: GRID}, () => new Uint8Array(GRID));
+  const parent = new Int32Array(GRID*GRID).fill(-1);
+  const idx = (x, z) => x*GRID + z;
+  const queue = [idx(sx, sz)];
+  visited[sx][sz] = 1;
+  let head = 0;
+  while (head < queue.length) {
+    const cur = queue[head++];
+    const cx = (cur/GRID)|0, cz = cur % GRID;
+    if (cx === gx && cz === gz) {
+      const path = [];
+      let p = cur;
+      while (p !== -1) { path.push([(p/GRID)|0, p%GRID]); p = parent[p]; }
+      return path.reverse();
+    }
+    for (const [dx, dz] of [[1,0],[-1,0],[0,1],[0,-1]]) {
+      const nx = cx+dx, nz = cz+dz;
+      if (nx < 0 || nz < 0 || nx >= GRID || nz >= GRID) continue;
+      if (cells[nx][nz].wall) continue;
+      if (visited[nx][nz]) continue;
+      visited[nx][nz] = 1;
+      parent[idx(nx, nz)] = cur;
+      queue.push(idx(nx, nz));
+    }
+  }
+  return null;
 }
 
 // ============================================================
@@ -3100,7 +3492,12 @@ function tick() {
   }
 
   if (controls.isLocked && !player.dying && !player.lyingDown && player.standingUp == null) {
-    const inWater = LEVELS[currentLevel]?.props === 'water';
+    // "In water" now means "inside the sunken pool footprint" (the redesigned
+    // pool level no longer floods the whole hall — only the pool itself).
+    const _pp = controls.getObject().position;
+    const inWater = !!(pool
+      && Math.abs(_pp.x - pool.x) < pool.halfX
+      && Math.abs(_pp.z - pool.z) < pool.halfZ);
     const onBoat = !!player.boat;
     const boostMul = player.speedBoost > 0 ? 1.45 : 1.0;
     // Boats glide near full speed; wading without one is slow.
@@ -3131,7 +3528,9 @@ function tick() {
       // Stand on the deck — gentle bobbing.
       obj.position.y = 1.85 + Math.sin(t * 1.4) * 0.04;
     } else {
-      const baseY = inWater ? 1.45 : 1.7;   // crouch-low so water reaches chest
+      // Pool is sunken ~1.6m: only drop slightly when stepping in, so the
+      // player still sees the deck + companions above the water plane.
+      const baseY = inWater ? 1.45 : 1.7;
       if (dir.lengthSq() > 0) obj.position.y = baseY + Math.sin(t * (sprint?12: inWater?5:8)) * (inWater?0.07:0.04);
       else                    obj.position.y = baseY + (inWater ? Math.sin(t*1.6)*0.02 : 0);
     }
@@ -3187,6 +3586,23 @@ function tick() {
     }
   }
 
+  // Medkit pickups — restore 3000 HP each.
+  for (const m of medkits) {
+    if (!m.alive) continue;
+    m.mesh.rotation.y += dt * 1.2;
+    m.mesh.position.y = m.baseY + Math.sin(t * 2.2 + m.seed) * 0.06;
+    const dx = m.mesh.position.x - controls.getObject().position.x;
+    const dz = m.mesh.position.z - controls.getObject().position.z;
+    if (dx*dx + dz*dz < 0.7*0.7 && player.hp < MAX_HP) {
+      const heal = Math.min(3000, MAX_HP - player.hp);
+      m.alive = false;
+      levelGroup.remove(m.mesh); levelGroup.remove(m.glow);
+      player.hp = Math.min(MAX_HP, player.hp + 3000);
+      say(`使用医药包。HP +${Math.ceil(heal)}`, 2.5);
+      blip(720, 0.15, 0.18); setTimeout(()=>blip(1080, 0.18, 0.15), 60);
+    }
+  }
+
   // Knife swing animation
   if (player.knifeSwing > 0) {
     player.knifeSwing = Math.max(0, player.knifeSwing - dt);
@@ -3237,8 +3653,19 @@ function tick() {
     if (!c.alive || !c.mesh) continue;
     // Slow rotation of formation so it feels alive
     c.angle += dt * 0.05;
-    const tx = pp.x + Math.cos(c.angle) * c.radius;
-    const tz = pp.z + Math.sin(c.angle) * c.radius;
+    let tx = pp.x + Math.cos(c.angle) * c.radius;
+    let tz = pp.z + Math.sin(c.angle) * c.radius;
+    // Keep companions out of the sunken pool (they have no swim animation).
+    if (pool) {
+      const px = tx - pool.x, pz = tz - pool.z;
+      if (Math.abs(px) < pool.halfX + 0.5 && Math.abs(pz) < pool.halfZ + 0.5) {
+        if (Math.abs(px) / pool.halfX > Math.abs(pz) / pool.halfZ) {
+          tx = pool.x + Math.sign(px || 1) * (pool.halfX + 1.2);
+        } else {
+          tz = pool.z + Math.sign(pz || 1) * (pool.halfZ + 1.2);
+        }
+      }
+    }
     const dx = tx - c.mesh.position.x;
     const dz = tz - c.mesh.position.z;
     const d = Math.hypot(dx, dz);
@@ -3342,7 +3769,7 @@ function tick() {
       const raw = pickCompanionLine(c.name, {
         nearestEntityDist,
         sanity: player.sanity,
-        hp: player.hp,
+        hp: player.hp / MAX_HP,
         speedBoost: player.speedBoost,
         currentLevel,
       });
@@ -3352,6 +3779,8 @@ function tick() {
     }
     companionLineCooldown = 8 + Math.random()*8;
   }
+
+  updateGuide(dt, t);
 
   // ---- Rocket projectiles ----
   for (let i = rockets.length - 1; i >= 0; i--) {
@@ -3461,7 +3890,7 @@ function tick() {
     }
 
     if (dist < 1.0 && deathScreen.style.display !== 'flex') {
-      player.hp -= dt * 0.20;     // ~5s of contact to die (was 1.7s)
+      player.hp -= dt * 1000;     // live wire: 1000 HP/s (~10s death)
       flashEl.style.opacity = '0.4';
       setTimeout(() => flashEl.style.opacity = '0', 120);
     }
@@ -3523,19 +3952,39 @@ function tick() {
   // Moths — flutter, chase player/companions, bite on contact, fall when killed.
   if (moths.length) {
     const pp = controls.getObject().position;
+    const ALARM_R = 4.5;     // moths only attack when player is within this radius
     for (const m of moths) {
-      // Wing flap — hinge each wing pivot up/down at the body axis.
-      if (m.alive) {
-        m.phase += dt * 22;
-        const flap = Math.sin(m.phase) * 1.0;
-        if (m.wL) m.wL.rotation.z =  flap;
-        if (m.wR) m.wR.rotation.z = -flap;
-      }
-
       if (!m.alive) {
         // Drop to the surface and lie there.
         m.mesh.position.y = Math.max(1.08, m.mesh.position.y - dt * 1.8);
         m.mesh.rotation.z += dt * 1.5;
+        continue;
+      }
+
+      // Decide alert state from player distance.
+      const dxP = m.mesh.position.x - pp.x;
+      const dzP = m.mesh.position.z - pp.z;
+      const playerD2 = dxP*dxP + dzP*dzP;
+      // Hysteresis: alert at 4.5m, calm down past 7m.
+      if (!m.alerted && playerD2 < ALARM_R * ALARM_R)            m.alerted = true;
+      else if (m.alerted && playerD2 > (ALARM_R + 2.5) * (ALARM_R + 2.5)) m.alerted = false;
+
+      // Wing flap — slow lazy beat at rest, fast frantic beat when alerted.
+      m.phase += dt * (m.alerted ? 22 : 4);
+      const flap = Math.sin(m.phase) * (m.alerted ? 1.0 : 0.25);
+      if (m.wL) m.wL.rotation.z =  flap;
+      if (m.wR) m.wR.rotation.z = -flap;
+
+      // Resting: glide back toward the perch and face outward; skip chase + bite.
+      if (!m.alerted) {
+        const rx = m.perchX - m.mesh.position.x;
+        const ry = m.perchY - m.mesh.position.y;
+        const rz = m.perchZ - m.mesh.position.z;
+        m.mesh.position.x += rx * Math.min(1, dt * 3);
+        m.mesh.position.y += ry * Math.min(1, dt * 3);
+        m.mesh.position.z += rz * Math.min(1, dt * 3);
+        m.mesh.rotation.y = m.perchYaw;
+        m.vx = 0; m.vz = 0;
         continue;
       }
 
@@ -3577,7 +4026,7 @@ function tick() {
       const pdz = m.mesh.position.z - pp.z;
       if (!player.dying && deathScreen.style.display !== 'flex' && pdx*pdx + pdy*pdy + pdz*pdz < 0.7*0.7) {
         if (m.biteTimer <= 0) {
-          player.hp -= 0.05;
+          player.hp -= 80;        // moth bite: 80 HP per bite
           m.biteTimer = 0.6;
           flashEl.style.background = '#603030';
           flashEl.style.opacity = '0.25';
@@ -3615,7 +4064,7 @@ function tick() {
       }
       const dx = pp.x - z.x, dz = pp.z - z.z;
       if (!player.boat && !player.dying && deathScreen.style.display !== 'flex' && dx*dx + dz*dz < z.r * z.r) {
-        player.hp -= dt * 0.30;   // ~3.3s of contact to die from full
+        player.hp -= dt * 800;    // toxic water: 800 HP/s (~12.5s death)
         flashEl.style.background = '#3aa030';
         flashEl.style.opacity = '0.35';
         setTimeout(() => { flashEl.style.opacity = '0'; flashEl.style.background = '#000'; }, 140);
@@ -3687,8 +4136,8 @@ function tick() {
   player.sanity = THREE.MathUtils.clamp(player.sanity, 0, 1);
 
   // HP slowly regenerates when no entity is breathing down your neck.
-  if (fearProx < 0.25 && player.hp < 1) {
-    player.hp = Math.min(1, player.hp + dt * 0.05);
+  if (fearProx < 0.25 && player.hp < MAX_HP) {
+    player.hp = Math.min(MAX_HP, player.hp + dt * MAX_HP * 0.02);
   }
 
   const _ac = getAudioCtx();
@@ -3709,10 +4158,19 @@ function tick() {
     const sc = 1 + Math.sin(t * 3) * 0.1;
     stairExit.pillar.scale.set(1, sc, 1);
   }
+  if (randomStair && randomStair.pillar) {
+    // Slightly faster pulse + hue shift so it stands out from the regular stair.
+    const sc = 1 + Math.sin(t * 4.5) * 0.12;
+    randomStair.pillar.scale.set(1, sc, 1);
+    const h = (t * 0.05) % 1;
+    randomStair.pillar.material.color.setHSL(0.75 + Math.sin(t * 1.3) * 0.05, 0.7, 0.55);
+  }
 
   document.getElementById('staminaFill').style.width = (player.stamina*100)+'%';
   document.getElementById('sanityFill').style.width  = (player.sanity *100)+'%';
-  document.getElementById('hpFill').style.width      = (Math.max(0,player.hp)*100)+'%';
+  document.getElementById('hpFill').style.width      = (Math.max(0,player.hp)/MAX_HP*100)+'%';
+  const hpEl = document.getElementById('hpNum');
+  if (hpEl) hpEl.textContent = `${Math.max(0, Math.ceil(player.hp))} / ${MAX_HP}`;
   document.getElementById('distance').textContent =
     '行程：' + Math.floor(player.totalDist) + ' 米　杏仁水：' + player.almondsCollected +
     '　武器：' + WEAPONS[player.weapon].name +
@@ -3732,6 +4190,12 @@ function tick() {
     if (dx*dx + dz*dz < 1.6*1.6) {
       const tag = currentLevel === LEVELS.length - 1 ? '逃出后室' : '下一层';
       if (getSubTimer() <= 0) say(`按 E ${tag}`, 0.4);
+    }
+  }
+  if (randomStair) {
+    const dx = pp.x - randomStair.pos.x, dz = pp.z - randomStair.pos.z;
+    if (dx*dx + dz*dz < 1.6*1.6) {
+      if (getSubTimer() <= 0) say('按 E 进入随机楼层', 0.4);
     }
   }
   if (elevator) {

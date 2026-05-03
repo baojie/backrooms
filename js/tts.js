@@ -83,14 +83,17 @@ function speakWebSpeech(speakerName, text, opts) {
   const u = new SpeechSynthesisUtterance(text);
   u.lang = 'zh-CN';
   u.voice = voice;
-  u.rate = opts.rate ?? 1.0;
-  u.pitch = opts.pitch ?? 1.0;
-  if (speakerName === '旁白') { u.pitch = 0.7; u.rate = 0.9; }
+  // Per-name baseline so each girl has a distinct voice…
+  let basePitch, baseRate;
+  if (speakerName === '旁白') { basePitch = 0.7; baseRate = 0.9; }
   else {
     let h = 0; for (const ch of speakerName) h = (h*31 + ch.charCodeAt(0)) & 0xff;
-    u.pitch = 0.95 + (h / 255) * 0.5;
-    u.rate  = 0.95 + ((h * 7) & 0xff) / 255 * 0.2;
+    basePitch = 0.90 + (h / 255) * 0.70;          // 0.90–1.60
+    baseRate  = 0.92 + ((h * 7) & 0xff) / 255 * 0.30; // 0.92–1.22
   }
+  // …but explicit opts (e.g. urgent death cry) override.
+  u.pitch = opts.pitch ?? basePitch;
+  u.rate  = opts.rate  ?? baseRate;
   u.onend = () => { if (c) c.talking = false; };
   u.onerror = () => { if (c) c.talking = false; };
   window.speechSynthesis.cancel();
