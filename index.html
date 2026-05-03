@@ -106,7 +106,7 @@
       <span class="key">ESC</span> 释放鼠标
     </p>
     <p style="margin-top:14px; font-size:12px; color:#a89570;">
-      捡起 <b style="color:#f6e29a">杏仁水</b> 恢复理智并加速。靠近楼梯按 E 进入下一层，或乘 <b style="color:#9ed8ff">电梯</b> 直达任意层。
+      捡起 <b style="color:#f6e29a">杏仁水</b> 恢复理智并加速。靠近楼梯按 E 进入下一层，或乘 <b style="color:#9ed8ff">电梯</b> 直达任意层。游泳池里小心 <b style="color:#cfefff">电缆</b> 与 <b style="color:#9fff66">毒水</b>，可按 E 上 <b style="color:#c8a070">船</b>。
     </p>
     <p style="margin-top:20px; color:#fff">点击进入 / 按 <span class="key">ENTER</span></p>
     <button id="startBtn" autofocus
@@ -205,7 +205,10 @@ const LAYOUT_BUILDERS = {
 
 // Bridge: audio's death cry needs the TTS speak callback
 function playDeathCry(c) { _playDeathCry(c, speak); }
-addEventListener('click', initAudio, { once: true });
+// Capture-phase + pointerdown/keydown so the AudioContext starts even when
+// the start-button click handler calls stopPropagation().
+addEventListener('pointerdown', initAudio, { once: true, capture: true });
+addEventListener('keydown',     initAudio, { once: true, capture: true });
 
 
 // ============================================================
@@ -252,6 +255,8 @@ let almonds = [];
 let knives = [];
 let entities = [];
 let electricZones = [];   // live-wire hazards on flooded levels — instant kill on contact
+let toxicZones = [];      // sickly-green water patches — slow damage on contact
+let boats = [];           // boardable boats on flooded levels
 let stairExit = null;
 let elevator = null;
 let currentLevel = 0;
@@ -1659,7 +1664,8 @@ function disposeLevel() {
     }
   });
   levelGroup = null;
-  wallBoxes = []; lights = []; almonds = []; knives = []; entities = []; electricZones = []; stairExit = null; elevator = null;
+  wallBoxes = []; lights = []; almonds = []; knives = []; entities = []; electricZones = []; toxicZones = []; boats = []; stairExit = null; elevator = null;
+  player.boat = null;
   wallMeshRef = null;
   rockets = [];
 }
@@ -2274,6 +2280,81 @@ function spawnProps(cfg, openCells) {
           phase: Math.random() * Math.PI * 2,
         });
       }
+
+      // Toxic water — sickly-green bubbling patches that slowly damage anything wading through.
+      const toxicCells = pick(5);
+      for (const [cx, cz] of toxicCells) {
+        const wx = (cx - GRID/2) * CELL + (Math.random()-0.5) * 1.0;
+        const wz = (cz - GRID/2) * CELL + (Math.random()-0.5) * 1.0;
+        const tg = new THREE.Group();
+        tg.position.set(wx, 0, wz);
+        const slime = new THREE.Mesh(
+          new THREE.CircleGeometry(2.0, 28),
+          new THREE.MeshBasicMaterial({ color: 0x6fbf3a, transparent:true, opacity:0.7, side: THREE.DoubleSide, depthWrite:false })
+        );
+        slime.rotation.x = -Math.PI/2;
+        slime.position.y = 1.07;
+        tg.add(slime);
+        // Bubble cluster — small spheres bobbing on the surface.
+        const bubbleMat = new THREE.MeshBasicMaterial({ color: 0xa8e070, transparent:true, opacity:0.8 });
+        const bubbles = [];
+        for (let b = 0; b < 7; b++) {
+          const ang = Math.random() * Math.PI * 2;
+          const rad = Math.random() * 1.6;
+          const s = 0.08 + Math.random() * 0.12;
+          const sph = new THREE.Mesh(new THREE.SphereGeometry(s, 6, 6), bubbleMat);
+          sph.position.set(Math.cos(ang) * rad, 1.1, Math.sin(ang) * rad);
+          tg.add(sph);
+          bubbles.push({ mesh: sph, baseY: 1.1, seed: Math.random() * Math.PI * 2 });
+        }
+        const glow = new THREE.PointLight(0x9fff66, 0.6, 4, 2);
+        glow.position.y = 1.4;
+        tg.add(glow);
+        levelGroup.add(tg);
+        toxicZones.push({ x: wx, z: wz, r: 2.0, slime, bubbles, glow });
+      }
+
+      // Wooden rowboats — board with E to glide over hazards safely.
+      const boatCells = pick(2);
+      for (const [cx, cz] of boatCells) {
+        const wx = (cx - GRID/2) * CELL;
+        const wz = (cz - GRID/2) * CELL;
+        const boat = new THREE.Group();
+        const woodMat = new THREE.MeshLambertMaterial({ color: 0x6b3a1a });
+        const trimMat = new THREE.MeshLambertMaterial({ color: 0x4a2810 });
+        // Hull (flattened box).
+        const hull = new THREE.Mesh(new THREE.BoxGeometry(1.4, 0.35, 2.8), woodMat);
+        hull.position.y = 1.05;
+        boat.add(hull);
+        // Inner well (slightly darker).
+        const well = new THREE.Mesh(new THREE.BoxGeometry(1.05, 0.2, 2.4), trimMat);
+        well.position.y = 1.20;
+        boat.add(well);
+        // Bow + stern bevels.
+        const bow = new THREE.Mesh(new THREE.ConeGeometry(0.7, 0.7, 4), woodMat);
+        bow.rotation.x = Math.PI / 2;
+        bow.rotation.z = Math.PI / 4;
+        bow.position.set(0, 1.05, 1.55);
+        boat.add(bow);
+        const stern = bow.clone();
+        stern.position.z = -1.55;
+        stern.rotation.x = -Math.PI / 2;
+        boat.add(stern);
+        // Bench seat.
+        const bench = new THREE.Mesh(new THREE.BoxGeometry(1.0, 0.08, 0.35), trimMat);
+        bench.position.y = 1.32;
+        boat.add(bench);
+        // Oar.
+        const oar = new THREE.Mesh(new THREE.CylinderGeometry(0.04, 0.04, 1.6, 6), woodMat);
+        oar.rotation.z = Math.PI / 2;
+        oar.position.set(0.7, 1.30, 0.2);
+        boat.add(oar);
+
+        boat.position.set(wx, 0, wz);
+        boat.rotation.y = Math.random() * Math.PI * 2;
+        levelGroup.add(boat);
+        boats.push({ mesh: boat, x: wx, z: wz, yaw: boat.rotation.y, occupied: false });
+      }
       break;
     }
     case 'crops': {
@@ -2731,6 +2812,29 @@ function trySwingKnife() {
 function tryInteract() {
   if (elevatorTransition) return;
   const p = controls.getObject().position;
+
+  // Boats — board / disembark.
+  if (player.boat) {
+    // Disembark: place player just to the side of the boat.
+    const b = player.boat;
+    b.occupied = false;
+    player.boat = null;
+    p.x = b.x + Math.cos(b.yaw + Math.PI/2) * 1.2;
+    p.z = b.z + Math.sin(b.yaw + Math.PI/2) * 1.2;
+    say('下船', 1.2);
+    return;
+  }
+  for (const b of boats) {
+    const dx = p.x - b.x, dz = p.z - b.z;
+    if (dx*dx + dz*dz < 2.2*2.2) {
+      b.occupied = true;
+      player.boat = b;
+      say('上船 — 再按 E 下船', 1.5);
+      blip(560, 0.18, 0.16);
+      return;
+    }
+  }
+
   if (elevator) {
     const dx = p.x - elevator.pos.x, dz = p.z - elevator.pos.z;
     if (dx*dx + dz*dz < 2.0*2.0) {
@@ -2867,8 +2971,10 @@ function tick() {
 
   if (controls.isLocked && !player.dying && !player.lyingDown && player.standingUp == null) {
     const inWater = LEVELS[currentLevel]?.props === 'water';
+    const onBoat = !!player.boat;
     const boostMul = player.speedBoost > 0 ? 1.45 : 1.0;
-    const waterMul = inWater ? 0.55 : 1.0;
+    // Boats glide near full speed; wading without one is slow.
+    const waterMul = onBoat ? 0.9 : (inWater ? 0.55 : 1.0);
     const sprint = keys['ShiftLeft'] && player.stamina > 0.05;
     const speed = (sprint ? 6 : 3.2) * boostMul * waterMul;
     const fwd = (keys['KeyW']?1:0) + (keys['KeyS']?-1:0);
@@ -2885,9 +2991,20 @@ function tick() {
     obj.position.addScaledVector(dir, speed * dt);
     collide(obj.position);
 
-    const baseY = inWater ? 1.45 : 1.7;   // crouch-low so water reaches chest
-    if (dir.lengthSq() > 0) obj.position.y = baseY + Math.sin(t * (sprint?12: inWater?5:8)) * (inWater?0.07:0.04);
-    else                    obj.position.y = baseY + (inWater ? Math.sin(t*1.6)*0.02 : 0);
+    if (onBoat) {
+      const b = player.boat;
+      b.x = obj.position.x;
+      b.z = obj.position.z;
+      if (dir.lengthSq() > 0) b.yaw = Math.atan2(dir.x, dir.z);
+      b.mesh.position.set(b.x, 0, b.z);
+      b.mesh.rotation.y = b.yaw;
+      // Stand on the deck — gentle bobbing.
+      obj.position.y = 1.85 + Math.sin(t * 1.4) * 0.04;
+    } else {
+      const baseY = inWater ? 1.45 : 1.7;   // crouch-low so water reaches chest
+      if (dir.lengthSq() > 0) obj.position.y = baseY + Math.sin(t * (sprint?12: inWater?5:8)) * (inWater?0.07:0.04);
+      else                    obj.position.y = baseY + (inWater ? Math.sin(t*1.6)*0.02 : 0);
+    }
 
     const moved = obj.position.distanceTo(player.lastPos);
     player.totalDist += moved;
@@ -3243,7 +3360,7 @@ function tick() {
       if (z.plug) z.plug.material.color.setRGB(1, 1, 0.6 + Math.random() * 0.4);
 
       const dx = pp.x - z.x, dz = pp.z - z.z;
-      if (!player.dying && deathScreen.style.display !== 'flex' && dx*dx + dz*dz < z.r * z.r) {
+      if (!player.boat && !player.dying && deathScreen.style.display !== 'flex' && dx*dx + dz*dz < z.r * z.r) {
         player.hp = 0;
         flashEl.style.background = '#cfefff';
         flashEl.style.opacity = '0.85';
@@ -3262,6 +3379,40 @@ function tick() {
           say(line, 4);
           speak('旁白', line, { rate: 0.9, pitch: 0.6 });
           playStatic();
+        }
+      }
+    }
+  }
+
+  // Toxic water — slow corrosive damage while wading through green slime.
+  if (toxicZones.length) {
+    const pp = controls.getObject().position;
+    for (const z of toxicZones) {
+      for (const b of z.bubbles) {
+        b.mesh.position.y = b.baseY + Math.sin(t * 2.4 + b.seed) * 0.06;
+      }
+      const dx = pp.x - z.x, dz = pp.z - z.z;
+      if (!player.boat && !player.dying && deathScreen.style.display !== 'flex' && dx*dx + dz*dz < z.r * z.r) {
+        player.hp -= dt * 0.30;   // ~3.3s of contact to die from full
+        flashEl.style.background = '#3aa030';
+        flashEl.style.opacity = '0.35';
+        setTimeout(() => { flashEl.style.opacity = '0'; flashEl.style.background = '#000'; }, 140);
+      }
+      for (const c of companions) {
+        if (!c.alive || !c.mesh) continue;
+        const cdx = c.mesh.position.x - z.x, cdz = c.mesh.position.z - z.z;
+        if (cdx*cdx + cdz*cdz < z.r * z.r) {
+          c.hp = (c.hp ?? 1) - dt * 0.5;
+          if (c.hp <= 0) {
+            c.alive = false;
+            leaveCorpse(c.mesh);
+            c.mesh = null;
+            playDeathCry(c);
+            const line = `${c.name} 中毒倒下了……`;
+            say(line, 4);
+            speak('旁白', line, { rate: 0.85, pitch: 0.55 });
+            playStatic();
+          }
         }
       }
     }
