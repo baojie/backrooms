@@ -30,7 +30,8 @@ JSDIR = ROOT / 'js'
 OUT   = ROOT / 'docs' / 'index.html'
 
 # Inline order matches index.html's own import order (deps before consumers).
-MODULES = ['levels.js', 'textures.js', 'audio.js', 'tts.js', 'lines.js', 'maze.js']
+MODULES = ['levels.js', 'textures.js', 'audio.js', 'tts.js', 'lines.js',
+           'maze.js', 'weapons.js', 'characters.js']
 
 html = SRC.read_text(encoding='utf-8')
 
