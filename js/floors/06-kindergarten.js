@@ -2,9 +2,23 @@
 
 import { buildClassrooms } from './_layouts.js';
 
+export function spawnProps(ctx) {
+  const { THREE, levelGroup, GRID, CELL, pick } = ctx;
+  for (const [cx, cz] of pick(10)) {
+    const wx = (cx-GRID/2)*CELL, wz = (cz-GRID/2)*CELL;
+    const toy = new THREE.Mesh(
+      new THREE.BoxGeometry(0.4,0.4,0.4),
+      new THREE.MeshLambertMaterial({ color: 0xff80a0 })
+    );
+    toy.position.set(wx + (Math.random()-0.5), 0.2, wz + (Math.random()-0.5));
+    levelGroup.add(toy);
+  }
+  return;}
+
 export const FLOOR = {
   name: '幼儿园',
   buildLayout: buildClassrooms,
+  spawnProps,
   wallRGB:  [245, 200, 205],
   floorRGB: [200, 160, 180],
   ceilRGB:  [255, 240, 220],
