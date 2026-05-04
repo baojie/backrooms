@@ -121,7 +121,13 @@ export function createElevator(ctx) {
       obj.position.x += (targetX - obj.position.x) * a * 0.4;
       obj.position.z += (targetZ - obj.position.z) * a * 0.4;
       obj.position.y = 1.7;
-      if (T.t > 0.6) { T.phase = 'closing'; T.t = 0; blip(440, 0.3, 0.18); }
+      // Don't auto-advance into 'closing' until the player has actually
+      // picked a destination floor. Otherwise the transition keeps
+      // ticking through fadeout/rebuild with target=null and crashes
+      // later on `LEVELS[null].name`.
+      if (T.t > 0.6 && T.target != null) {
+        T.phase = 'closing'; T.t = 0; blip(440, 0.3, 0.18);
+      }
     } else if (T.phase === 'closing') {
       const a = Math.min(T.t / 0.7, 1);
       const e = S.elevator;
@@ -130,8 +136,13 @@ export function createElevator(ctx) {
     } else if (T.phase === 'fadeout') {
       flashEl.style.opacity = String(Math.min(T.t / 0.6, 1));
       if (T.t > 0.6) {
+        // Belt-and-suspenders: if for any reason target is still null
+        // by fadeout (shouldn't happen now that 'pulling' guards on it),
+        // bail to avoid the LEVELS[null].name crash.
+        const dest = LEVELS[T.target];
+        if (!dest) { elevatorTransition = null; flashEl.style.opacity = '0'; return; }
         T.phase = 'rebuild'; T.t = 0;
-        say(`电梯运行中…… → ${LEVELS[T.target].name}`, 1.5);
+        say(`电梯运行中…… → ${dest.name}`, 1.5);
       }
     } else if (T.phase === 'rebuild') {
       if (T.t > 0.5) {
