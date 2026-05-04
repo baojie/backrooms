@@ -34,7 +34,7 @@ export const LEVELS = [
   { name:'地铁站',     layout:'platforms',
     wallRGB:[90,90,95],    floorRGB:[40,40,45],    ceilRGB:[60,60,65],
     ambient:0x303038, lightHex:0xffe080, fogHex:0x101014, fogNear:2,  fogFar:18, hasCeiling:true, props:'rails' },
-  { name:'终焉',       layout:'open',
+  { name:'顶楼',       layout:'open',
     wallRGB:[10,10,10],    floorRGB:[10,10,12],    ceilRGB:[10,10,10],
     ambient:0x000000, lightHex:0xffffff, fogHex:0x000000, fogNear:1,  fogFar:14, hasCeiling:false, props:'void' },
 ];

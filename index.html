@@ -91,7 +91,7 @@
     <h1>后室</h1>
     <p>你穿模出了现实，跌入永无止境的迷宫。<br>
     十层地狱，每层都不一样。<br>
-    你和 <b>10 名少女队员</b> 必须找到下楼梯，活着抵达终焉。</p>
+    你和 <b>10 名少女队员</b> 必须找到下楼梯，活着抵达顶楼。</p>
     <p style="margin-top:18px">
       <span class="key">W A S D</span> 移动 &nbsp;
       <span class="key">SHIFT</span> 奔跑 &nbsp;
@@ -233,9 +233,10 @@ addEventListener('resize', () => {
   renderer.setSize(innerWidth, innerHeight);
 });
 
-// Wide, far-reaching beam — lights up a large area in front of the player.
-// angle ≈ 60° (Math.PI/3), generous penumbra, gentle falloff, long range.
-const flashlight = new THREE.SpotLight(0xfff5c8, 0, 50, Math.PI/3, 0.5, 0.7);
+// Wide, soft beam — warm and gentle, fades quickly with distance so it
+// doesn't blow out walls when you're close.
+// angle ≈ 60° (Math.PI/3), large penumbra (soft edge), faster decay.
+const flashlight = new THREE.SpotLight(0xffe6b0, 0, 32, Math.PI/3, 0.85, 1.4);
 flashlight.position.set(0, 0, 0.1);
 flashlight.target.position.set(0, 0, -1);
 camera.add(flashlight);
@@ -3765,7 +3766,7 @@ function tick() {
     }
   }
 
-  flashlight.intensity = (player.flashlightOn && player.flashlightBattery > 0) ? 60 : 0;
+  flashlight.intensity = (player.flashlightOn && player.flashlightBattery > 0) ? 22 : 0;
   if (player.flashlightOn) {
     player.flashlightBattery = Math.max(0, player.flashlightBattery - dt*0.02);
     if (player.flashlightBattery === 0) player.flashlightOn = false;
@@ -4401,40 +4402,86 @@ tick();
 
 // ============================================================
 // Auto-screenshot mode: ?shot=1[&floor=N][&run=N]
-// Bypasses the title overlay and pointer-lock requirement so headless
-// Chrome can render a real in-game frame. screenshot.sh drives this.
+// Drives headless Chrome captures from script/screenshot.sh.
+//   - With ?floor=N: bypasses overlay + pointer lock, warps to floor N,
+//     simulates forward walk + camera pan for `run` seconds.
+//   - Without floor: leaves the title overlay visible, idles for `run`
+//     seconds so dynamic UI elements settle.
+// In both cases the main rAF loop is hard-stopped after `run` seconds so
+// Chrome treats the page as settled and snaps a screenshot.
 // ============================================================
 (function () {
   const params = new URLSearchParams(location.search);
   if (!params.get('shot')) return;
-  const floor = Math.max(1, Math.min(LEVELS.length,
-    parseInt(params.get('floor') || '1', 10)));
+  const wantFloor = params.has('floor');
   const runSec = parseFloat(params.get('run') || '3');
 
-  overlay.style.display = 'none';
-  // PointerLockControls gates movement on `isLocked`; spoof it.
-  Object.defineProperty(controls, 'isLocked',
-    { value: true, configurable: true, writable: true });
+  const _origRAF = window.requestAnimationFrame.bind(window);
+  let shotDone = false;
+  window.requestAnimationFrame = function (cb) {
+    if (shotDone) return 0;
+    return _origRAF(cb);
+  };
 
-  buildLevel(floor - 1);
-  player.lyingDown = false;
-  player.standingUp = null;
-  player.hasWokenUp = true;
+  if (wantFloor) {
+    const floor = Math.max(1, Math.min(LEVELS.length,
+      parseInt(params.get('floor'), 10)));
+    overlay.style.display = 'none';
+    Object.defineProperty(controls, 'isLocked',
+      { value: true, configurable: true, writable: true });
+    buildLevel(floor - 1);
+    player.lyingDown = false;
+    player.standingUp = null;
+    player.hasWokenUp = true;
+    // Brighten the scene for screenshots — the flashlight is the only
+    // strong directional light most floors have.
+    player.flashlightOn = true;
+    player.flashlightBattery = 1;
+  }
 
-  // Walk forward and pan the camera so the shot isn't always at spawn.
-  const startTs = performance.now();
+  // Don't start the walk timer until the rigged-girl FBX has loaded and
+  // every companion has been swapped in — otherwise screenshots catch the
+  // procedural placeholder rigs. Falls through after MAX_WAIT_MS so a
+  // model-load failure doesn't hang capture forever.
+  const MAX_WAIT_MS = 25000;
+  const waitStart = performance.now();
+  function modelsReady() {
+    if (!wantFloor) return true;
+    if (typeof girlLoaded === 'undefined' || !girlLoaded) return false;
+    return _gltfUpgradeIdx >= companions.length;
+  }
+
+  let startTs = 0;
+  function waitForModels() {
+    const elapsed = performance.now() - waitStart;
+    if (modelsReady() || elapsed > MAX_WAIT_MS) {
+      const diag = `[shot] elapsed=${elapsed.toFixed(0)}ms girlLoaded=${typeof girlLoaded !== 'undefined' && girlLoaded} idx=${typeof _gltfUpgradeIdx !== 'undefined' ? _gltfUpgradeIdx : '?'} comp=${typeof companions !== 'undefined' ? companions.length : '?'}`;
+      console.log(diag);
+      const d = document.createElement('div');
+      d.style.cssText = 'position:fixed;bottom:0;left:0;background:#fff;color:#000;padding:4px;font-size:12px;z-index:9999;';
+      d.textContent = diag;
+      document.body.appendChild(d);
+      startTs = performance.now();
+      pump();
+    } else {
+      _origRAF(waitForModels);
+    }
+  }
   function pump() {
     const now = (performance.now() - startTs) / 1000;
     if (now < runSec) {
-      keys['KeyW'] = true;
-      controls.getObject().rotation.y = now * 0.5;
-      requestAnimationFrame(pump);
+      if (wantFloor) {
+        keys['KeyW'] = true;
+        controls.getObject().rotation.y = now * 0.5;
+      }
+      _origRAF(pump);
     } else {
       keys['KeyW'] = false;
+      shotDone = true;
       window.__shotReady = true;
     }
   }
-  requestAnimationFrame(pump);
+  _origRAF(waitForModels);
 })();
 </script>
 </body>
