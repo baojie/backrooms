@@ -201,8 +201,11 @@ function buildLevel(n, opts = {}) {
 
   // Ceiling-mounted fluorescent panels — only placed on floors that have a
   // ceiling. Floors with hasCeiling:false (farm, rooftop) are open-sky and
-  // shouldn't have fixtures floating in mid-air.
-  if (cfg.hasCeiling) {
+  // shouldn't have fixtures floating in mid-air. Pool floor (props:'water')
+  // builds its own dense fluorescent grid in floors/04-pool.js, so skip
+  // the generic per-cell lights there to stay under the GPU's
+  // MAX_FRAGMENT_UNIFORM_VECTORS cap.
+  if (cfg.hasCeiling && cfg.props !== 'water') {
     // Lobby fixtures are wider/longer to read as classic 2×4ft fluorescent
     // troffers; other floors keep the slimmer panel.
     const panelGeom = cfg.style === 'lobby'

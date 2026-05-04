@@ -126,20 +126,30 @@ export function spawnProps(ctx) {
   }
   addPost(x0, z0); addPost(x0, z1); addPost(x1, z0); addPost(x1, z1);
 
-  // Dense rectangular fluorescent ceiling panels in a regular grid.
+  // Dense rectangular fluorescent ceiling panels in a regular grid. The
+  // panels are MeshBasic (no shader cost), but each PointLight eats
+  // fragment-shader uniforms — real GPUs cap that at 1024 vectors, so
+  // emit a PointLight only on every 3rd panel position. Panels without
+  // a paired light are still emissive enough to read as fixtures.
   const flMat = new THREE.MeshBasicMaterial({ color: 0xeaffff });
   const flGeom = new THREE.BoxGeometry(2.2, 0.04, 0.5);
   const flStep = 6;
   const flLimit = (GRID / 2) * CELL - 4;
-  for (let xx = -flLimit; xx <= flLimit + 0.01; xx += flStep) {
-    for (let zz = -flLimit; zz <= flLimit + 0.01; zz += flStep) {
+  let li_ix = 0, li_iz;
+  for (let xx = -flLimit; xx <= flLimit + 0.01; xx += flStep, li_ix++) {
+    li_iz = 0;
+    for (let zz = -flLimit; zz <= flLimit + 0.01; zz += flStep, li_iz++) {
       const fl = new THREE.Mesh(flGeom, flMat);
       fl.position.set(xx, WALL_HEIGHT - 0.05, zz);
       levelGroup.add(fl);
-      const li = new THREE.PointLight(0xfff8e8, 0.95, 12, 1.4);
-      li.position.set(xx, WALL_HEIGHT - 0.2, zz);
-      levelGroup.add(li);
-      lights.push({ light: li, panel: fl, base: 0.95, seed: Math.random()*100, broken: Math.random() < 0.05 });
+      // 1-in-9 panels gets the actual PointLight; bump intensity to
+      // cover the wider area each light now needs to illuminate.
+      if (li_ix % 3 === 1 && li_iz % 3 === 1) {
+        const li = new THREE.PointLight(0xfff8e8, 2.4, 22, 1.4);
+        li.position.set(xx, WALL_HEIGHT - 0.2, zz);
+        levelGroup.add(li);
+        lights.push({ light: li, panel: fl, base: 2.4, seed: Math.random()*100, broken: Math.random() < 0.05 });
+      }
     }
   }
 
