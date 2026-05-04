@@ -6,13 +6,17 @@ import { buildMaze } from './_layouts.js';
 export const FLOOR = {
   name: '黄色房间',
   buildLayout: buildMaze,
-  wallRGB:  [212, 187, 96],
-  floorRGB: [110,  70, 35],
-  ceilRGB:  [180, 170, 140],
-  ambient:  0x665533,
-  lightHex: 0xfff0b8,
-  fogHex:   0x1a1505,
-  fogNear:  4,
-  fogFar:   28,
+  // `style: 'lobby'` opts buildLevel into the Backrooms-canonical texture
+  // pack: vertical-seam wallpaper + drop-ceiling tiles + mottled carpet,
+  // and the wider 1.2×0.6m fluorescent panel.
+  style:    'lobby',
+  wallRGB:  [206, 178,  92],     // mustard yellow, slightly desaturated
+  floorRGB: [148, 110,  56],     // damp khaki carpet (lighter than before)
+  ceilRGB:  [222, 212, 188],     // off-cream tiles
+  ambient:  0x6a5a2e,            // warm yellow ambient lift
+  lightHex: 0xfff4c8,            // creamy fluorescent
+  fogHex:   0x2c2410,             // warm yellow haze (was near-black)
+  fogNear:  3,
+  fogFar:   24,
   hasCeiling: true,
 };
