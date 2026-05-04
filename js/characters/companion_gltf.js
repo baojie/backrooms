@@ -1,16 +1,18 @@
 // GLTF/FBX-based female-companion builders + the feminine-reskin helper.
 //
-// Three pieces:
+// Pieces:
 //   - `attachFeminineReskin(bones, palette)` — attaches feminine body parts
 //     (skirt, bust, ponytail, bow, face) onto a Soldier-rig clone's bone
 //     hierarchy. Used by `buildGLTFCompanion`.
 //   - `buildGLTFCompanion(shirtColor, name)` — clones Soldier.glb, tints it
 //     toward `shirtColor`, hooks up Idle/Walk/Run mixer.
-//   - `buildGLTFGirl(palette, name)` — clones the capoeira-girl FBX, tints
-//     each material toward the dress colour, adds a head bow, hooks up
-//     Idle/Ginga animation. Returns null until the FBX has loaded.
+//   - `buildQuaterniusGirl(palette, name, idx)` — clones the indexed
+//     Quaternius modular-women GLB so each team girl gets her own look.
+//   - `buildGLTFGirl(palette, name, idx)` — entry point used by the upgrade
+//     scheduler. Tries Quaternius first, falls back to the Capoeira FBX,
+//     then returns null if neither has loaded yet.
 //
-// All three depend on the loader state in `./loaders.js`.
+// All depend on the loader state in `./loaders.js`.
 
 import * as THREE from 'three';
 import * as SkeletonUtils from 'three/addons/utils/SkeletonUtils.js';
@@ -18,6 +20,7 @@ import { makeNameTag } from './nametag.js';
 import {
   isGirlLoaded, getGirlProto, getGirlAnims,
   getSoldierProto, getSoldierAnims,
+  getQuaterniusGirl,
 } from './loaders.js';
 
 export function attachFeminineReskin(bones, palette) {
@@ -163,8 +166,75 @@ export function attachFeminineReskin(bones, palette) {
   attachLeg('rightupleg', 'rightleg', 'rightfoot');
 }
 
-export function buildGLTFGirl(palette, name) {
-  if (!isGirlLoaded()) return null;
+// Quaternius modular-women builder. Each call clones the proto at slot
+// `idx % count`, lightly tints meshes toward `palette.dressColor` (so each
+// girl still reads as "her" colour), and wires whatever Idle/Walk/Run
+// clips ship in the GLB.
+export function buildQuaterniusGirl(palette, name, idx) {
+  const entry = getQuaterniusGirl(idx);
+  if (!entry) return null;
+  const root = SkeletonUtils.clone(entry.proto);
+  // Quaternius models export in metres but the bind size varies — rescale
+  // to ~1.7m and rest the feet on y=0, same as the Capoeira path.
+  const bbox = new THREE.Box3().setFromObject(root);
+  const h = bbox.max.y - bbox.min.y;
+  if (h > 0.001) {
+    root.scale.setScalar(1.7 / h);
+    const bbox2 = new THREE.Box3().setFromObject(root);
+    root.position.y -= bbox2.min.y;
+  }
+  const tint = new THREE.Color(palette.dressColor);
+  root.traverse(o => {
+    if (o.isMesh && o.material) {
+      const mats = Array.isArray(o.material) ? o.material : [o.material];
+      o.material = mats.map(m => {
+        const cm = m.clone();
+        // Quaternius uses flat vertex colours; nudge toward dressColor only
+        // a little so each character keeps her distinct palette.
+        if (cm.color) cm.color.lerp(tint, 0.12);
+        return cm;
+      });
+      if (o.material.length === 1) o.material = o.material[0];
+      o.castShadow = false;
+      o.frustumCulled = false;
+    }
+  });
+  let headBone = null;
+  root.traverse(o => {
+    if (o.isBone && /head/i.test(o.name) && !headBone) headBone = o;
+  });
+  const mixer = new THREE.AnimationMixer(root);
+  let idleAct = null, walkAct = null, runAct = null;
+  for (const clip of entry.anims) {
+    if (/idle/i.test(clip.name))      idleAct = mixer.clipAction(clip);
+    else if (/^run$/i.test(clip.name)) runAct  = mixer.clipAction(clip);
+    else if (/walk/i.test(clip.name)) walkAct = mixer.clipAction(clip);
+  }
+  if (!idleAct && entry.anims.length) idleAct = mixer.clipAction(entry.anims[0]);
+  if (!walkAct) walkAct = idleAct;
+  if (idleAct) { idleAct.play(); idleAct.setEffectiveWeight(1); }
+  if (walkAct && walkAct !== idleAct) { walkAct.play(); walkAct.setEffectiveWeight(0); }
+  if (runAct && runAct !== walkAct && runAct !== idleAct) { runAct.play(); runAct.setEffectiveWeight(0); }
+  root.userData.gltf = {
+    mixer, idleAct, walkAct, runAct, headBone,
+    isGLTF: true, source: 'quaternius', variant: entry.name,
+  };
+  if (name) root.add(makeNameTag(name, palette.dressColor));
+  return root;
+}
+
+export function buildGLTFGirl(palette, name, idx) {
+  // Prefer a Quaternius-pack rig so each girl looks distinct. Falls back
+  // to the Capoeira FBX (one-rig-fits-all) if the indexed Quaternius
+  // proto hasn't loaded yet — re-runs of the upgrade scheduler will
+  // upgrade these girls again once the new proto arrives.
+  if (typeof idx === 'number') {
+    const q = buildQuaterniusGirl(palette, name, idx);
+    if (q) return q;
+  }
+  // Capoeira fallback. Both proto AND anims need to be loaded — they
+  // arrive in two separate FBX requests and the proto lands first.
+  if (!getGirlProto() || !getGirlAnims()) return null;
   const root = SkeletonUtils.clone(getGirlProto());
   // FBX is exported in centimetres — auto-rescale to ~1.7m, feet at y=0.
   const bbox = new THREE.Box3().setFromObject(root);
@@ -189,8 +259,29 @@ export function buildGLTFGirl(palette, name) {
     }
   });
   let headBone = null;
+  // Each frame we override the upper-arm + forearm bone rotations so the
+  // Ginga clip can't raise the hands above the head. We start from the
+  // bind quaternion (typically T-pose with arms out to the sides) and fold
+  // the upper arm down ~90° around the local Z axis (mirrored per side).
+  // Hips & legs keep swaying with the original clip.
+  const armBones = [];
+  const _Z = new THREE.Vector3(0, 0, 1);
   root.traverse(o => {
-    if (o.isBone && /head/i.test(o.name) && !headBone) headBone = o;
+    if (!o.isBone) return;
+    const n = o.name;
+    if (/head/i.test(n) && !headBone) headBone = o;
+    const isUpper = /(LeftArm|RightArm)$/i.test(n);
+    const isFore  = /(LeftForeArm|RightForeArm)$/i.test(n);
+    if (!isUpper && !isFore) return;
+    const isLeft = /Left/i.test(n);
+    const target = o.quaternion.clone();
+    if (isUpper) {
+      // Rotate the bind T-pose down: left arm folds clockwise (-π/2 around
+      // local Z), right arm counter-clockwise. Forearm stays straight.
+      const fold = new THREE.Quaternion().setFromAxisAngle(_Z, (isLeft ? -1 : 1) * Math.PI / 2);
+      target.multiply(fold);
+    }
+    armBones.push({ bone: o, targetQuat: target });
   });
   if (headBone) {
     const bow = new THREE.Mesh(
@@ -215,7 +306,10 @@ export function buildGLTFGirl(palette, name) {
   if (idleAct) { idleAct.play(); idleAct.setEffectiveWeight(1); }
   if (walkAct && walkAct !== idleAct) { walkAct.play(); walkAct.setEffectiveWeight(0); }
   if (runAct && runAct !== walkAct && runAct !== idleAct) { runAct.play(); runAct.setEffectiveWeight(0); }
-  root.userData.gltf = { mixer, idleAct, walkAct, runAct, headBone, isGLTF: true };
+  const postPose = armBones.length
+    ? () => { for (const ab of armBones) ab.bone.quaternion.copy(ab.targetQuat); }
+    : null;
+  root.userData.gltf = { mixer, idleAct, walkAct, runAct, headBone, postPose, isGLTF: true };
   if (name) root.add(makeNameTag(name, palette.dressColor));
   return root;
 }

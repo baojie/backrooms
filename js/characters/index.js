@@ -17,4 +17,5 @@ export {
 } from './companion_procedural.js';
 export {
   attachFeminineReskin, buildGLTFGirl, buildGLTFCompanion,
+  buildQuaterniusGirl,
 } from './companion_gltf.js';
