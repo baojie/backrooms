@@ -51,6 +51,7 @@ MODULES = [
     'weapon_fx.js',
     'companion_ai.js',
     'guide.js',
+    'screenshot_mode.js',
     # Character builders — leaf files first, then the index.js facade.
     'characters/loaders.js', 'characters/nametag.js', 'characters/knife.js',
     'characters/hostile.js',
