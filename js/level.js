@@ -58,21 +58,20 @@ function buildLayout(cfg) {
 }
 
 function disposeLevel() {
-  const levelGroup = S.levelGroup;
-  if (!levelGroup) return;
-  scene.remove(levelGroup);
-  levelGroup.traverse(o => {
+  const lg = S.levelGroup;
+  if (!lg) return;
+  scene.remove(lg);
+  lg.traverse(o => {
     if (o.geometry) o.geometry.dispose && o.geometry.dispose();
     if (o.material) {
       if (Array.isArray(o.material)) o.material.forEach(m => m.dispose());
       else o.material.dispose();
     }
   });
-  levelGroup = null;
-  S.levelGroup = levelGroup;
-  // Clear arrays IN PLACE so module factories (weapon_fx, companion_ai,
-  // hazards, S.entities) that captured these references at construction
-  // time continue to see the same array — never reassign with `[]`.
+  S.levelGroup = null;
+  // Clear arrays IN PLACE so module factories (weapons/fx, companion_ai,
+  // hazards, ...) that captured these references at construction time
+  // keep seeing the same array — never reassign with `[]`.
   S.wallBoxes.length = 0;
   S.lights.length = 0;
   S.almonds.length = 0;
@@ -84,24 +83,20 @@ function disposeLevel() {
   S.boats.length = 0;
   S.moths.length = 0;
   S.rockets.length = 0;
-  // Per-level singletons reset to null — getters used by modules
-  // re-resolve each call so this propagates correctly.
-  stairExit = null;
-  S.stairExit = stairExit;
-  randomStair = null;
-  S.randomStair = randomStair;
-  elevator = null;
-  S.elevator = elevator;
-  pool = null;
-  S.pool = pool;
-  guide = null;
-  S.guide = guide;
+  // Per-level singletons reset to null.
+  S.stairExit = null;
+  S.randomStair = null;
+  S.elevator = null;
+  S.pool = null;
+  S.guide = null;
+  S.wallMeshRef = null;
   player.boat = null;
-  wallMeshRef = null;
-  S.wallMeshRef = wallMeshRef;
 }
 
 function buildLevel(n, opts = {}) {
+  // Local aliases so the long buildLevel body stays readable; mutations
+  // assign back into S at the right moments below. `cells` is read after
+  // buildLayout populates S.cells.
   let levelGroup, wallMeshRef, stairExit, randomStair, elevator, pool, guide, cells, currentLevel;
   disposeLevel();
   const cfg = LEVELS[n];
@@ -115,6 +110,7 @@ function buildLevel(n, opts = {}) {
   scene.add(levelGroup);
 
   buildLayout(cfg);
+  cells = S.cells;   // sync the local alias after buildLayout writes S.cells
 
   // Pool level: define the sunken-pool footprint up front so floor / pickup /
   // companion code can avoid placing things inside it.

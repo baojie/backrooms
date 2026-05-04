@@ -66,7 +66,10 @@ export function spawnProps(ctx) {
     g.rotateY(Math.PI / 2);
     return g;
   }
-  const _bodyGeoms = { sedan: makeBodyGeom('sedan'), hatch: makeBodyGeom('hatch') };
+  let _bodyGeoms;
+  try {
+    _bodyGeoms = { sedan: makeBodyGeom('sedan'), hatch: makeBodyGeom('hatch') };
+  } catch (e) { console.error('[garage] makeBodyGeom failed:', e); throw e; }
 
   function buildCarMesh(bodyColor, type) {
     const g = new THREE.Group();
