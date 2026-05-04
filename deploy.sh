@@ -50,6 +50,7 @@ MODULES = [
     'weapons.js',
     'weapons_setup.js',
     'companion_roster.js',
+    'player_state.js',
     'weapon_fx.js',
     'companion_ai.js',
     'guide.js',

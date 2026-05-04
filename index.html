@@ -197,6 +197,7 @@ import { pickCompanionLine, COMPANION_LINES_GENERIC } from './js/lines.js';
 import { buildKnifeMesh } from './js/weapons.js';
 import { setupWeapons } from './js/weapons_setup.js';
 import { buildCompanionRoster } from './js/companion_roster.js';
+import { MAX_HP, createPlayerState, createSetWeapon } from './js/player_state.js';
 import {
   loadCharacters, isSoldierLoaded, isGirlLoaded, getButterflyProto,
   makeNameTag, attachCompanionKnife,
@@ -264,39 +265,16 @@ let cells = [];
 // ============================================================
 // Player + companions
 // ============================================================
-const MAX_HP = 10000;
-const player = {
-  hp: MAX_HP, sanity: 1.0, stamina: 1.0,
-  flashlightOn: false, flashlightBattery: 1.0,
-  totalDist: 0,
-  speedBoost: 0,
-  almondsCollected: 0,
-  hasKnife: true,           // always equipped — selectable in weapon menu
-  knifeSwing: 0,
-  dying: 0,                 // 0..1 death animation progress
-  gunRecoil: 0,
-  shotsFired: 0,
-  kills: { entities: 0, companions: 0 },
-  weapon: 'pistol',
-  mouseHeld: false,
-  lastPos: new THREE.Vector3(),
-};
+const player = createPlayerState(THREE);
 
-function setWeapon(name) {
-  if (!WEAPONS[name]) return;
-  player.weapon = name;
-  for (const k of WEAPON_ORDER) WEAPONS[k].pivot.visible = (k === name);
-  const t = `武器：${WEAPONS[name].name}`;
-  say(t, 1.5);
-}
+// Held-weapon pivots + WEAPONS table — see js/weapons_setup.js.
+const { WEAPONS, WEAPON_ORDER, heldKnifePivot } = setupWeapons(camera);
+const setWeapon = createSetWeapon({ player, WEAPONS, WEAPON_ORDER, say });
 
 // Companion roster (10 girls, golden-angle palette) — see js/companion_roster.js.
 const companions = buildCompanionRoster(TEAM_SIZE, GIRL_NAMES);
 // Register the companion roster with the TTS module so it can mark `talking`.
 _setCompanionsForTTS(companions);
-
-// Held-weapon pivots + WEAPONS table — see js/weapons_setup.js.
-const { WEAPONS, WEAPON_ORDER, heldKnifePivot } = setupWeapons(camera);
 
 // ============================================================
 // Web-resourced humanoid models (loaded by js/characters.js).
@@ -308,14 +286,6 @@ loadCharacters({
   onSoldierReady: () => upgradeEntitiesToGLTF(),
   onGirlReady:    () => scheduleGLTFUpgrade(),
 });
-
-
-
-
-// Lazily swap procedural entities with Soldier clones once the GLTF resolves.
-
-
-
 
 
 
