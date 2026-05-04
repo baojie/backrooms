@@ -206,6 +206,7 @@ import {
 } from './js/characters/index.js';
 import { findPathBFS, updateGuide as _updateGuide } from './js/guide.js';
 import { createWeaponFX } from './js/weapon_fx.js';
+import { createCompanionAI } from './js/companion_ai.js';
 
 // Bridge: audio's death cry needs the TTS speak callback
 function playDeathCry(c) { _playDeathCry(c, speak); }
@@ -426,75 +427,12 @@ loadCharacters({
 
 
 // Lazily swap procedural entities with Soldier clones once the GLTF resolves.
-function upgradeEntitiesToGLTF() {
-  if (!isSoldierLoaded() || !levelGroup) return;
-  for (const e of entities) {
-    if (!e.mesh || e.mesh.userData.gltf) continue;
-    const newMesh = buildSoldierEntity();
-    if (!newMesh) return;
-    const oldPos = e.mesh.position.clone();
-    const oldRot = e.mesh.rotation.y;
-    levelGroup.remove(e.mesh);
-    newMesh.position.copy(oldPos);
-    newMesh.rotation.y = oldRot;
-    levelGroup.add(newMesh);
-    e.mesh = newMesh;
-  }
-}
 
 
 
 
 
 
-// Shared knife combat — runs for both GLTF girls (rig=null) and procedural
-// companions. Procedural figures get an explicit elbow swing; GLTF arms are
-// already mixer-driven so we only fade the swing-phase timer.
-function runCompanionKnifeCombat(c, dt, _t, rig) {
-  if (!c.hasKnife) return;
-  let nearest = null, nd = Infinity;
-  for (const e of entities) {
-    const ddx = e.mesh.position.x - c.mesh.position.x;
-    const ddz = e.mesh.position.z - c.mesh.position.z;
-    const d2 = ddx*ddx + ddz*ddz;
-    if (d2 < nd) { nd = d2; nearest = e; }
-  }
-  nd = Math.sqrt(nd);
-  if (nearest && nd < 3.0) {
-    const ax = nearest.mesh.position.x - c.mesh.position.x;
-    const az = nearest.mesh.position.z - c.mesh.position.z;
-    if (nd > 1.0) {
-      c.mesh.position.x += (ax/nd) * 4.5 * dt;
-      c.mesh.position.z += (az/nd) * 4.5 * dt;
-      collide(c.mesh.position, 0.25);
-    }
-    c.mesh.rotation.y = Math.atan2(ax, az);
-    c.attackCooldown = (c.attackCooldown || 0) - dt;
-    if (nd < 1.5 && c.attackCooldown <= 0) {
-      c.swingPhase = 1.0;
-      c.attackCooldown = 0.55 + Math.random() * 0.25;
-      nearest.hp = (nearest.hp ?? 1) - 0.35;
-      blip(220, 0.08, 0.10);
-      if (nearest.hp <= 0) {
-        const idx = entities.indexOf(nearest);
-        if (idx >= 0) entities.splice(idx, 1);
-        if (levelGroup) levelGroup.remove(nearest.mesh);
-        const line = `${c.name} 解决了一个！`;
-        say(line, 3);
-        speak('旁白', line);
-        blip(660, 0.2, 0.15); setTimeout(() => blip(990, 0.25, 0.12), 80);
-      }
-    }
-  }
-  if (rig && c.swingPhase > 0) {
-    const elbowGroup = rig.rightArm.children.find(o => o.isGroup);
-    if (elbowGroup) elbowGroup.rotation.x = -1.2 * Math.sin(c.swingPhase * Math.PI);
-    c.swingPhase = Math.max(0, c.swingPhase - dt * 4);
-    if (c.swingPhase === 0 && elbowGroup) elbowGroup.rotation.x = 0;
-  } else if (c.swingPhase > 0) {
-    c.swingPhase = Math.max(0, c.swingPhase - dt * 4);
-  }
-}
 
 // Each floor object in LEVELS carries its own `buildLayout(GRID)` function
 // (see js/floors/*); just call it and assign to the local `cells` ref.
@@ -1054,38 +992,6 @@ function buildLevel(n, opts = {}) {
 // Lazy GLTF upgrade: swap a few companions per frame from procedural to
 // rigged feminine GLTF figures. Spreads the heavy SkeletonUtils.clone cost
 // across many frames so level transitions never freeze the screen.
-let _gltfUpgradeIdx = 0;
-function scheduleGLTFUpgrade() {
-  _gltfUpgradeIdx = 0;
-  if (!isGirlLoaded()) return;
-  function step() {
-    if (!isGirlLoaded() || !levelGroup) return;
-    const budget = 3;   // upgrade up to 3 figures per frame
-    let done = 0;
-    while (_gltfUpgradeIdx < companions.length && done < budget) {
-      const idx = _gltfUpgradeIdx++;
-      const c = companions[idx];
-      if (c && c.alive && c.mesh && !c.mesh.userData.gltf) {
-        const oldPos = c.mesh.position.clone();
-        const oldRot = c.mesh.rotation.y;
-        // `idx` selects which Quaternius proto to clone so each girl is
-        // visually distinct. If that proto isn't ready, buildGLTFGirl
-        // falls back to the Capoeira rig.
-        const newMesh = buildGLTFGirl(c, c.name, idx);
-        if (!newMesh) continue;
-        levelGroup.remove(c.mesh);
-        c.mesh = newMesh;
-        c.mesh.position.copy(oldPos);
-        c.mesh.rotation.y = oldRot;
-        levelGroup.add(c.mesh);
-        if (c.hasKnife) attachCompanionKnife(c.mesh);
-        done++;
-      }
-    }
-    if (_gltfUpgradeIdx < companions.length) requestAnimationFrame(step);
-  }
-  requestAnimationFrame(step);
-}
 
 function spawnProps(cfg, openCells) {
   const candidate = openCells.slice();
@@ -1426,6 +1332,18 @@ const _wfx = createWeaponFX({
 });
 const { useWeapon, fireGun, fireRocket, sprayInsecticide,
         trySwingKnife, explode, destroyWallsAt } = _wfx;
+
+// Companion AI + GLTF upgrade scheduler. Same closure pattern: arrays
+// captured by reference, levelGroup re-derived on each call.
+const _ai = createCompanionAI({
+  entities, companions,
+  getLevelGroup: () => levelGroup,
+  isSoldierLoaded, isGirlLoaded,
+  buildSoldierEntity, buildGLTFGirl, attachCompanionKnife,
+  collide, blip, say, speak,
+});
+const { runCompanionKnifeCombat, upgradeEntitiesToGLTF,
+        scheduleGLTFUpgrade, isGLTFUpgradeComplete } = _ai;
 
 function tick() {
   const dt = Math.min(clock.getDelta(), 0.05);
@@ -2285,7 +2203,7 @@ tick();
   function modelsReady() {
     if (!wantFloor) return true;
     if (!isGirlLoaded()) return false;
-    return _gltfUpgradeIdx >= companions.length;
+    return isGLTFUpgradeComplete();
   }
 
   let startTs = 0;

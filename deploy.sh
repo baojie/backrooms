@@ -49,6 +49,7 @@ MODULES = [
     'textures.js', 'audio.js', 'tts.js', 'lines.js',
     'weapons.js',
     'weapon_fx.js',
+    'companion_ai.js',
     'guide.js',
     # Character builders — leaf files first, then the index.js facade.
     'characters/loaders.js', 'characters/nametag.js', 'characters/knife.js',
