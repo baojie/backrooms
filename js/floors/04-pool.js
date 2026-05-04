@@ -65,66 +65,24 @@ export function spawnProps(ctx) {
   water.position.set(pool.x, pool.surfaceY, pool.z);
   levelGroup.add(water);
 
-  // White square pillars on the deck — at the pool corners and midpoints.
+  // White square pillars rising out of the water in a regular grid.
+  // The pool now fills the whole floor, so the pillars give it scale +
+  // something to navigate around in a boat. Each pillar plants its base
+  // in the pool bottom and extends to the ceiling.
   const pillarMat = new THREE.MeshLambertMaterial({ map: tileLightTex });
   const pillarSide = 1.2;
-  const pillarGeom = new THREE.BoxGeometry(pillarSide, WALL_HEIGHT, pillarSide);
-  const off = 2.0;   // distance from pool edge to pillar center
-  const deckPillarPos = [
-    // Long-side pillars (north & south of pool)
-    [-pool.halfX + 4, +pool.halfZ + off],
-    [ 0,              +pool.halfZ + off],
-    [+pool.halfX - 4, +pool.halfZ + off],
-    [-pool.halfX + 4, -pool.halfZ - off],
-    [ 0,              -pool.halfZ - off],
-    [+pool.halfX - 4, -pool.halfZ - off],
-    // Short-side pillars (east & west of pool)
-    [+pool.halfX + off, 0],
-    [-pool.halfX - off, 0],
-  ];
-  for (const [px, pz] of deckPillarPos) {
-    const p = new THREE.Mesh(pillarGeom, pillarMat);
-    p.position.set(px, WALL_HEIGHT / 2, pz);
-    levelGroup.add(p);
-    wallBoxes.push({ x: px, z: pz, half: pillarSide / 2 });
+  const pillarH = WALL_HEIGHT - pool.bottomY;     // ceiling - pool bottom
+  const pillarGeom = new THREE.BoxGeometry(pillarSide, pillarH, pillarSide);
+  const pillarStep = 14;
+  const pillarLimit = pool.halfX - 6;
+  for (let xx = -pillarLimit; xx <= pillarLimit + 0.01; xx += pillarStep) {
+    for (let zz = -pillarLimit; zz <= pillarLimit + 0.01; zz += pillarStep) {
+      const p = new THREE.Mesh(pillarGeom, pillarMat);
+      p.position.set(xx, pool.bottomY + pillarH / 2, zz);
+      levelGroup.add(p);
+      wallBoxes.push({ x: xx, z: zz, half: pillarSide / 2 });
+    }
   }
-
-  // Metal handrails along the four pool edges.
-  const railMat = new THREE.MeshLambertMaterial({ color: 0x9aa0a6, emissive: 0x202020 });
-  const railR = 0.05;
-  const railH = 0.95;
-  const railOff = 0.25;
-  function addRail(x1, z1, x2, z2) {
-    const dx = x2 - x1, dz = z2 - z1;
-    const len = Math.hypot(dx, dz);
-    const r = new THREE.Mesh(
-      new THREE.CylinderGeometry(railR, railR, len, 8), railMat
-    );
-    r.position.set((x1 + x2) / 2, railH, (z1 + z2) / 2);
-    r.rotation.z = Math.PI / 2;
-    r.rotation.y = -Math.atan2(dz, dx);
-    levelGroup.add(r);
-  }
-  // Posts — short verticals at each rail corner.
-  const postGeom = new THREE.CylinderGeometry(0.04, 0.04, railH, 8);
-  function addPost(x, z) {
-    const p = new THREE.Mesh(postGeom, railMat);
-    p.position.set(x, railH / 2, z);
-    levelGroup.add(p);
-  }
-  const x0 = pool.x - pool.halfX - railOff;
-  const x1 = pool.x + pool.halfX + railOff;
-  const z0 = pool.z - pool.halfZ - railOff;
-  const z1 = pool.z + pool.halfZ + railOff;
-  addRail(x0, z0, x1, z0);
-  addRail(x0, z1, x1, z1);
-  addRail(x0, z0, x0, z1);
-  addRail(x1, z0, x1, z1);
-  // Posts every ~4m along the long sides + corners on the short sides.
-  for (let xx = x0; xx <= x1 + 0.01; xx += 4) {
-    addPost(xx, z0); addPost(xx, z1);
-  }
-  addPost(x0, z0); addPost(x0, z1); addPost(x1, z0); addPost(x1, z1);
 
   // Dense rectangular fluorescent ceiling panels in a regular grid. The
   // panels are MeshBasic (no shader cost), but each PointLight eats
@@ -165,8 +123,10 @@ export function spawnProps(ctx) {
     return out;
   };
 
+  // Pool now covers the whole floor → scale hazards up: 6 electric
+  // cables / 4 toxic patches / 4 boats / 6 moths spread out.
   const surfY = pool.surfaceY;
-  for (const [wx, wz] of inPoolPick(3)) {
+  for (const [wx, wz] of inPoolPick(6)) {
     const zoneGroup = new THREE.Group();
     zoneGroup.position.set(wx, 0, wz);
 
@@ -207,8 +167,8 @@ export function spawnProps(ctx) {
     });
   }
 
-  // Toxic patches — a couple bubbling green slicks floating in the pool.
-  for (const [wx, wz] of inPoolPick(2)) {
+  // Toxic patches — bubbling green slicks floating in the pool.
+  for (const [wx, wz] of inPoolPick(4)) {
     const tg = new THREE.Group();
     tg.position.set(wx, 0, wz);
     const slime = new THREE.Mesh(
@@ -236,10 +196,10 @@ export function spawnProps(ctx) {
     toxicZones.push({ x: wx, z: wz, r: 1.6, slime, bubbles, glow });
   }
 
-  // Wooden rowboats — float just above the pool surface, inside the pool
-  // footprint. Press E adjacent to one to board: the player glides over
-  // electric / toxic zones without taking damage.
-  for (const [wx, wz] of inPoolPick(2)) {
+  // Wooden rowboats — float just above the pool surface, scattered
+  // across the wide pool. Press E adjacent to one to board: the player
+  // glides over electric / toxic zones without taking damage.
+  for (const [wx, wz] of inPoolPick(4)) {
     const boat = new THREE.Group();
     const woodMat = new THREE.MeshLambertMaterial({ color: 0x6b3a1a });
     const trimMat = new THREE.MeshLambertMaterial({ color: 0x4a2810 });
@@ -275,7 +235,7 @@ export function spawnProps(ctx) {
 
   // Moth swarm — perched on the pool-room walls; bite for 80 HP and only
   // the spray-can (key 5) kills them in one hit.
-  const NUM_MOTHS = 4;
+  const NUM_MOTHS = 6;
   for (let i = 0; i < NUM_MOTHS; i++) {
     const moth = new THREE.Group();
     let wL = null, wR = null;

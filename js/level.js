@@ -111,10 +111,14 @@ function buildLevel(n, opts = {}) {
   buildLayout(cfg);
   cells = S.cells;   // sync the local alias after buildLayout writes S.cells
 
-  // Pool level: define the sunken-pool footprint up front so floor / pickup /
-  // companion code can avoid placing things inside it.
+  // Pool level: the entire grid is one big sunken pool — only a thin 2m
+  // strip of deck around the outside edge so the outer walls have
+  // somewhere to plant. companion / pickup / spawn code uses this
+  // footprint to filter where things land.
   if (cfg.props === 'water') {
-    pool = { x: 0, z: 0, halfX: 22, halfZ: 12, surfaceY: -0.20, bottomY: -1.6 };
+    const half = (GRID / 2) * CELL;       // 54
+    pool = { x: 0, z: 0, halfX: half - 2, halfZ: half - 2,
+             surfaceY: -0.20, bottomY: -1.6 };
     S.pool = pool;
   }
 
@@ -175,6 +179,9 @@ function buildLevel(n, opts = {}) {
       { sz: 2 * pool.halfZ,    sx: half - pool.halfX,           cx: -(pool.halfX + half) / 2,     cz: 0 },
     ];
     for (const g of stripGeoms) {
+      // Skip degenerate strips — when the pool fills nearly the whole
+      // floor (halfX/halfZ ≈ half) the strip on that axis collapses.
+      if (g.sx <= 0.1 || g.sz <= 0.1) continue;
       const strip = new THREE.Mesh(new THREE.PlaneGeometry(g.sx, g.sz), floorMat);
       strip.rotation.x = -Math.PI / 2;
       strip.position.set(g.cx, 0, g.cz);
@@ -235,10 +242,11 @@ function buildLevel(n, opts = {}) {
 
   let spawnX = 0, spawnZ = 0;
   if (pool) {
-    // Spawn well clear of the pool edge so you start on the deck looking at
-    // the pool, not inside it.
+    // Pool covers the whole floor — spawn near the back wall, inside the
+    // pool, facing toward center so the player sees the room stretching
+    // ahead with hazards and boats scattered across the water.
     spawnX = 0;
-    spawnZ = pool.z + pool.halfZ + 10;
+    spawnZ = pool.halfZ - 4;
   } else {
     outer: for (let r = 0; r < 5; r++) {
       for (let dx = -r; dx <= r; dx++)
@@ -272,9 +280,13 @@ function buildLevel(n, opts = {}) {
   const almondCapGeom  = new THREE.CylinderGeometry(0.06, 0.06, 0.06, 10);
   const almondBodyMat  = new THREE.MeshBasicMaterial({ color: 0xf6e29a, transparent: true, opacity: 0.85 });
   const almondCapMat   = new THREE.MeshBasicMaterial({ color: 0x6b5018 });
-  // Pickups + stair placement should avoid the sunken pool footprint.
+  // Pickups + stair placement avoid the sunken pool — except when the
+  // pool fills almost the whole floor (no real deck), in which case
+  // they have to go in the water and the player will need a boat.
+  const _half = (GRID/2) * CELL;
+  const _poolFillsFloor = pool && pool.halfX > _half - 4 && pool.halfZ > _half - 4;
   const isOnDeck = ([cx, cz]) => {
-    if (!pool) return true;
+    if (!pool || _poolFillsFloor) return true;
     const wx = (cx - GRID/2) * CELL, wz = (cz - GRID/2) * CELL;
     return Math.abs(wx - pool.x) > pool.halfX + 1.0
         || Math.abs(wz - pool.z) > pool.halfZ + 1.0;
