@@ -1336,13 +1336,15 @@ const { useWeapon, fireGun, fireRocket, sprayInsecticide,
 // Companion AI + GLTF upgrade scheduler. Same closure pattern: arrays
 // captured by reference, levelGroup re-derived on each call.
 const _ai = createCompanionAI({
+  THREE, controls,
   entities, companions,
   getLevelGroup: () => levelGroup,
+  getPool: () => pool,
   isSoldierLoaded, isGirlLoaded,
   buildSoldierEntity, buildGLTFGirl, attachCompanionKnife,
   collide, blip, say, speak,
 });
-const { runCompanionKnifeCombat, upgradeEntitiesToGLTF,
+const { updateCompanions, upgradeEntitiesToGLTF,
         scheduleGLTFUpgrade, isGLTFUpgradeComplete } = _ai;
 
 function tick() {
@@ -1528,112 +1530,7 @@ function tick() {
 
   // Companions follow as a flock around the player
   const pp = controls.getObject().position;
-  for (const c of companions) {
-    if (!c.alive || !c.mesh) continue;
-    // Slow rotation of formation so it feels alive
-    c.angle += dt * 0.05;
-    let tx = pp.x + Math.cos(c.angle) * c.radius;
-    let tz = pp.z + Math.sin(c.angle) * c.radius;
-    // Keep companions out of the sunken pool (they have no swim animation).
-    if (pool) {
-      const px = tx - pool.x, pz = tz - pool.z;
-      if (Math.abs(px) < pool.halfX + 0.5 && Math.abs(pz) < pool.halfZ + 0.5) {
-        if (Math.abs(px) / pool.halfX > Math.abs(pz) / pool.halfZ) {
-          tx = pool.x + Math.sign(px || 1) * (pool.halfX + 1.2);
-        } else {
-          tz = pool.z + Math.sign(pz || 1) * (pool.halfZ + 1.2);
-        }
-      }
-    }
-    const dx = tx - c.mesh.position.x;
-    const dz = tz - c.mesh.position.z;
-    const d = Math.hypot(dx, dz);
-    let walking = false;
-    if (d > 0.4) {
-      const sp = Math.min(d * 2.2, 5.0);
-      c.mesh.position.x += (dx/d) * sp * dt;
-      c.mesh.position.z += (dz/d) * sp * dt;
-      collide(c.mesh.position, 0.25);
-      c.mesh.rotation.y = Math.atan2(dx, dz);
-      walking = d > 0.5;
-    }
-    // Distance to camera — skip rig animation for far figures
-    const camDx = c.mesh.position.x - pp.x;
-    const camDz = c.mesh.position.z - pp.z;
-    const camD2 = camDx*camDx + camDz*camDz;
-    if (camD2 > 30 * 30) continue;
-    // ---- GLTF-rigged feminine girl: drive mixer + walk/idle blend ----
-    const gltf = c.mesh.userData.gltf;
-    if (gltf) {
-      gltf.mixer.update(dt);
-      if (gltf.postPose) gltf.postPose();
-      const targetWalk = walking ? 1 : 0;
-      c._walkBlend = THREE.MathUtils.lerp(c._walkBlend ?? 0, targetWalk, 0.18);
-      if (gltf.idleAct) gltf.idleAct.setEffectiveWeight(1 - c._walkBlend);
-      if (gltf.walkAct) gltf.walkAct.setEffectiveWeight(c._walkBlend);
-      if (gltf.runAct)  gltf.runAct.setEffectiveWeight(0);
-      // Talking: head bob + mouth open via the bone-attached face hooks
-      if (gltf.headBone) {
-        gltf.headBone.rotation.x = c.talking ? Math.sin(t * 14) * 0.10 : gltf.headBone.rotation.x * 0.9;
-        const face = gltf.headBone.userData.face;
-        if (face) {
-          // Eye tracking
-          const local = c.mesh.worldToLocal(pp.clone());
-          const yaw = THREE.MathUtils.clamp(Math.atan2(local.x, -local.z) * 0.4, -0.35, 0.35);
-          if (face.lEyeball) face.lEyeball.rotation.y = yaw;
-          if (face.rEyeball) face.rEyeball.rotation.y = yaw;
-          // Mouth animation
-          if (face.mouth) {
-            if (c.talking) {
-              const open = 0.5 + Math.abs(Math.sin(t * 18)) * 0.5;
-              face.mouth.scale.y = 1 + open * 6;
-            } else {
-              face.mouth.scale.y += (1 - face.mouth.scale.y) * 0.3;
-            }
-          }
-        }
-      }
-      // Knife combat works on both GLTF and procedural figures
-      runCompanionKnifeCombat(c, dt, t, null);
-      continue;
-    }
-    // ---- Feminine procedural rig animation ----
-    const rig = c.mesh.userData.rig;
-    if (rig) {
-      c.walkPhase += dt * (walking ? 8 : 1.5);
-      const sw = walking ? Math.sin(c.walkPhase) * 0.55 : Math.sin(c.walkPhase) * 0.04;
-      rig.leftLeg.rotation.x  =  sw;
-      rig.rightLeg.rotation.x = -sw;
-      rig.leftArm.rotation.x  = -sw * 0.7;
-      rig.rightArm.rotation.x =  sw * 0.7;
-      // Skirt sway
-      if (rig.skirt) rig.skirt.rotation.z = Math.sin(c.walkPhase * 0.6) * 0.05;
-      // Long hair sway
-      if (rig.hairBack) rig.hairBack.rotation.x = Math.sin(c.walkPhase * 0.7) * 0.08;
-      // Breathing
-      if (rig.torso) {
-        const br = 1 + Math.sin(t * 1.4 + c.bobSeed) * 0.03;
-        rig.torso.scale.set(br, 1, br * 0.85);
-      }
-      // Eye-tracking pupils glance toward player
-      if (rig.lEyeball && rig.rEyeball) {
-        const local = c.mesh.worldToLocal(pp.clone());
-        const yaw = THREE.MathUtils.clamp(Math.atan2(local.x, -local.z) * 0.4, -0.35, 0.35);
-        rig.lEyeball.rotation.y = yaw;
-        rig.rEyeball.rotation.y = yaw;
-      }
-      // Talking: head bob + lip motion
-      if (c.talking) {
-        rig.head.rotation.x = Math.sin(t * 12) * 0.08;
-        if (rig.lips) rig.lips.scale.y = 1 + Math.abs(Math.sin(t * 16)) * 4;
-      } else {
-        rig.head.rotation.x *= 0.9;
-        if (rig.lips) rig.lips.scale.y += (1 - rig.lips.scale.y) * 0.3;
-      }
-
-      runCompanionKnifeCombat(c, dt, t, rig);
-    }
-  }
+  updateCompanions(dt, t);
 
   companionLineCooldown -= dt;
   if (companionLineCooldown <= 0) {
