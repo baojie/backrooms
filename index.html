@@ -3441,6 +3441,130 @@ function findPathBFS(sx, sz, gx, gz) {
 }
 
 // ============================================================
+// Guide NPC update — runs once per frame from tick().
+// ============================================================
+const GUIDE_GREET_LINES = [
+  '别怕，跟我走，我知道怎么出去。',
+  '走这边，我带你们到楼梯口。',
+  '我等了好久了。来，跟紧我。',
+  '我以前出去过——跟着我，别走散。',
+  '你们脸色这么难看，跟我来，前面有楼梯。',
+];
+const GUIDE_LEAD_LINES = [
+  '快到了，跟紧。',
+  '这边，左拐。',
+  '别回头，往前走。',
+  '撑一下，就两个拐弯。',
+  '小心脚下。',
+  '你们是好孩子。',
+  '前面那束光就是出口。',
+  '别说话，听我的就行。',
+  '一起走，别落下。',
+  '我数着步子呢，快了。',
+];
+const GUIDE_ARRIVE_LINES = [
+  '到了——你们自己上楼。',
+  '楼梯就在这儿。我能送的就到这。',
+  '别犹豫，下去就是下一层。',
+  '我留在这儿，你们走吧。',
+];
+
+function updateGuide(dt, t) {
+  if (!guide || !guide.alive || !guide.mesh) return;
+  const pp = controls.getObject().position;
+  const dToPlayer = Math.hypot(guide.mesh.position.x - pp.x, guide.mesh.position.z - pp.z);
+
+  if (!guide.greeted && dToPlayer < 4.5) {
+    guide.greeted = true;
+    guide.leading = true;
+    const line = GUIDE_GREET_LINES[Math.floor(Math.random()*GUIDE_GREET_LINES.length)];
+    say(`好心人：「${line}」`, 5);
+    speak('好心人', line, { pitch: 0.95, rate: 0.95 });
+  }
+
+  // Halo gentle pulse
+  if (guide.haloRing) {
+    const sc = 1 + Math.sin(t * 2) * 0.08;
+    guide.haloRing.scale.set(sc, sc, sc);
+  }
+  if (guide.haloLight) {
+    guide.haloLight.intensity = 1.4 + Math.sin(t * 3) * 0.4;
+  }
+
+  let walking = false;
+  if (guide.leading && stairExit && !guide.arrived) {
+    if (!guide.path) {
+      const gcx = Math.max(0, Math.min(GRID-1, Math.floor(guide.mesh.position.x / CELL + GRID/2)));
+      const gcz = Math.max(0, Math.min(GRID-1, Math.floor(guide.mesh.position.z / CELL + GRID/2)));
+      const ecx = Math.max(0, Math.min(GRID-1, Math.floor(stairExit.pos.x / CELL + GRID/2)));
+      const ecz = Math.max(0, Math.min(GRID-1, Math.floor(stairExit.pos.z / CELL + GRID/2)));
+      guide.path = findPathBFS(gcx, gcz, ecx, ecz);
+      guide.pathIdx = guide.path && guide.path.length > 1 ? 1 : 0;
+    }
+    if (guide.path && guide.pathIdx < guide.path.length) {
+      // Pause if the player is too far behind so the guide doesn't outrun them.
+      const playerLag = dToPlayer > 7.0;
+      if (!playerLag) {
+        const [tcx, tcz] = guide.path[guide.pathIdx];
+        const twx = (tcx - GRID/2)*CELL, twz = (tcz - GRID/2)*CELL;
+        const dx = twx - guide.mesh.position.x;
+        const dz = twz - guide.mesh.position.z;
+        const dd = Math.hypot(dx, dz);
+        if (dd < 0.5) {
+          guide.pathIdx++;
+        } else {
+          const sp = 2.6;
+          const beforeX = guide.mesh.position.x, beforeZ = guide.mesh.position.z;
+          guide.mesh.position.x += (dx/dd) * sp * dt;
+          guide.mesh.position.z += (dz/dd) * sp * dt;
+          collide(guide.mesh.position, 0.30);
+          guide.mesh.rotation.y = Math.atan2(dx, dz);
+          walking = true;
+          const moved = Math.hypot(guide.mesh.position.x - beforeX, guide.mesh.position.z - beforeZ);
+          if (moved < sp * dt * 0.25) {
+            guide.stuckTimer += dt;
+            if (guide.stuckTimer > 0.8) {
+              guide.path = null;
+              guide.stuckTimer = 0;
+            }
+          } else guide.stuckTimer = 0;
+        }
+      }
+      // Periodic encouragement
+      guide.lineCooldown -= dt;
+      if (guide.lineCooldown <= 0) {
+        const line = GUIDE_LEAD_LINES[Math.floor(Math.random()*GUIDE_LEAD_LINES.length)];
+        say(`好心人：「${line}」`, 3);
+        speak('好心人', line, { pitch: 0.95, rate: 0.95 });
+        guide.lineCooldown = 6 + Math.random()*5;
+      }
+    } else if (!guide.arrived) {
+      guide.arrived = true;
+      const line = GUIDE_ARRIVE_LINES[Math.floor(Math.random()*GUIDE_ARRIVE_LINES.length)];
+      say(`好心人：「${line}」`, 5);
+      speak('好心人', line, { pitch: 0.95, rate: 0.95 });
+    }
+  }
+
+  // Walk / idle animation on the procedural rig
+  const rig = guide.mesh.userData.rig;
+  if (rig) {
+    guide.walkPhase += dt * (walking ? 7 : 1.5);
+    const sw = walking ? Math.sin(guide.walkPhase) * 0.5 : Math.sin(guide.walkPhase) * 0.04;
+    if (rig.leftLeg)  rig.leftLeg.rotation.x  =  sw;
+    if (rig.rightLeg) rig.rightLeg.rotation.x = -sw;
+    if (rig.leftArm)  rig.leftArm.rotation.x  = -sw * 0.6;
+    if (rig.rightArm) rig.rightArm.rotation.x =  sw * 0.6;
+    if (rig.torso) {
+      const br = 1 + Math.sin(t * 1.4 + guide.bobSeed) * 0.03;
+      rig.torso.scale.set(br, 1, br * 0.85);
+    }
+  }
+
+  guide.pos.copy(guide.mesh.position);
+}
+
+// ============================================================
 // Collision
 // ============================================================
 function collide(pos, radius=0.35) {
