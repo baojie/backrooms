@@ -177,7 +177,6 @@
 </script>
 <script type="module">
 import * as THREE from 'three';
-import { PointerLockControls } from 'three/addons/controls/PointerLockControls.js';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { FBXLoader } from 'three/addons/loaders/FBXLoader.js';
 import * as SkeletonUtils from 'three/addons/utils/SkeletonUtils.js';
@@ -208,6 +207,7 @@ import { findPathBFS, updateGuide as _updateGuide } from './js/guide.js';
 import { createWeaponFX } from './js/weapon_fx.js';
 import { createCompanionAI } from './js/companion_ai.js';
 import { maybeRunScreenshotMode } from './js/screenshot_mode.js';
+import { createScene } from './js/scene.js';
 
 // Bridge: audio's death cry needs the TTS speak callback
 function playDeathCry(c) { _playDeathCry(c, speak); }
@@ -218,35 +218,9 @@ addEventListener('keydown',     initAudio, { once: true, capture: true });
 
 
 // ============================================================
-// Setup
+// Setup — see js/scene.js for renderer / camera / controls / flashlight.
 // ============================================================
-const scene = new THREE.Scene();
-const renderer = new THREE.WebGLRenderer({ antialias: false });
-renderer.setPixelRatio(Math.min(window.devicePixelRatio, 1.5));
-renderer.setSize(innerWidth, innerHeight);
-document.body.appendChild(renderer.domElement);
-
-const camera = new THREE.PerspectiveCamera(75, innerWidth / innerHeight, 0.1, 120);
-camera.position.set(0, 1.7, 0);
-
-const controls = new PointerLockControls(camera, renderer.domElement);
-scene.add(controls.getObject());
-window.__game = { controls };
-
-addEventListener('resize', () => {
-  camera.aspect = innerWidth / innerHeight;
-  camera.updateProjectionMatrix();
-  renderer.setSize(innerWidth, innerHeight);
-});
-
-// Wide, soft beam — warm and gentle, fades quickly with distance so it
-// doesn't blow out walls when you're close.
-// angle ≈ 60° (Math.PI/3), large penumbra (soft edge), faster decay.
-const flashlight = new THREE.SpotLight(0xffe6b0, 0, 32, Math.PI/3, 0.85, 1.4);
-flashlight.position.set(0, 0, 0.1);
-flashlight.target.position.set(0, 0, -1);
-camera.add(flashlight);
-camera.add(flashlight.target);
+const { scene, renderer, camera, controls, flashlight } = createScene();
 
 
 // ============================================================
