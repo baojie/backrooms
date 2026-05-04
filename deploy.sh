@@ -20,12 +20,13 @@ if ! command -v terser >/dev/null 2>&1; then
   exit 1
 fi
 
-mkdir -p docs/assets/models
+mkdir -p docs/assets/models docs/assets/textures
 
 # Mirror runtime assets so GitHub Pages serves them at the same relative
 # paths the bundled index.html requests (no third-party dependency at
 # runtime).
-rsync -a --delete --delete-excluded --exclude='README.md' assets/models/ docs/assets/models/
+rsync -a --delete --delete-excluded --exclude='README.md' assets/models/   docs/assets/models/
+rsync -a --delete --delete-excluded --exclude='README.md' assets/textures/ docs/assets/textures/
 
 python3 - <<'PY'
 import re, subprocess, pathlib, posixpath, sys
