@@ -49,12 +49,12 @@ export function spawnProps(ctx) {
     levelGroup.add(w);
   }
 
-  // Translucent pool water — dim teal, not opaque, so the pool bottom is
-  // still readable through it.
+  // Translucent pool water — bright canonical Poolrooms turquoise, not the
+  // muddy teal of before. Reads as 'lit pool' instead of 'flooded basement'.
   const water = new THREE.Mesh(
     new THREE.PlaneGeometry(innerW, innerD),
     new THREE.MeshBasicMaterial({
-      color: 0x4a7f8c, transparent: true, opacity: 0.55,
+      color: 0x35c0d6, transparent: true, opacity: 0.55,
       side: THREE.DoubleSide, depthWrite: false,
     })
   );
