@@ -54,6 +54,7 @@ MODULES = [
     'screenshot_mode.js',
     'scene.js',
     'collision.js',
+    'overlay.js',
     # Character builders — leaf files first, then the index.js facade.
     'characters/loaders.js', 'characters/nametag.js', 'characters/knife.js',
     'characters/hostile.js',
