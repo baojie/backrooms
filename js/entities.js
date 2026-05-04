@@ -26,7 +26,7 @@ import * as THREE from 'three';
 export function createEntities(ctx) {
   const {
     S,
-    controls, player, deathScreen, flashEl,
+    controls, player, deathScreen, flashEl, companions,
     leaveCorpse, playDeathCry, playStatic,
     say, speak,
   } = ctx;
@@ -36,7 +36,6 @@ export function createEntities(ctx) {
     if (!entities.length) return;
     const pp = controls.getObject().position;
     const wallBoxes = S.wallBoxes;
-    const companions = companions;
 
     for (const e of entities) {
       const v = new THREE.Vector3().subVectors(pp, e.mesh.position);

@@ -53,8 +53,7 @@ export function createLevelBuilder(ctx) {
   const floorTitleEl = document.getElementById('floorTitle');
 
 function buildLayout(cfg) {
-  cells = cfg.buildLayout(GRID);
-  S.cells = cells;
+  S.cells = cfg.buildLayout(GRID);
 }
 
 function disposeLevel() {
@@ -534,6 +533,7 @@ function buildLevel(n, opts = {}) {
       btn, dL, dR, dLBaseX, dRBaseX,
       doorOpen: 1,    // 1 = open, 0 = closed
     };
+    S.elevator = elevator;
   }
 
   // ---------- Guide NPC: a kind stranger who leads the player to the exit ----------
@@ -579,6 +579,7 @@ function buildLevel(n, opts = {}) {
         lineCooldown: 4,
         walkPhase: 0, bobSeed: Math.random()*Math.PI*2,
       };
+      S.guide = guide;
     }
   }
 
@@ -663,7 +664,7 @@ function spawnProps(cfg, openCells) {
     cfg.spawnProps({
       THREE, levelGroup, GRID, CELL, WALL_HEIGHT, pick,
       wallBoxes: S.wallBoxes, electricZones: S.electricZones,
-      toxicZones: S.toxicZones, moths: S.moths, pool,
+      toxicZones: S.toxicZones, moths: S.moths, pool: S.pool,
       getButterflyProto, makeNoiseTexture,
     });
   }

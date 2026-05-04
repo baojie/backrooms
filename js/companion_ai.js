@@ -156,7 +156,7 @@ export function createCompanionAI(ctx) {
   // player's eyes / mouth for "talking" animation.
   function updateCompanions(dt, t) {
     const pp = controls.getObject().position;
-    const pool = getPool ? S.pool : null;
+    const pool = S.pool;
     for (const c of companions) {
       if (!c.alive || !c.mesh) continue;
       // Slow rotation of formation so it feels alive

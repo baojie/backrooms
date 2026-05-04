@@ -147,7 +147,10 @@ const _level = createLevelBuilder({
   buildCompanionMesh, attachCompanionKnife, makeNameTag, buildProceduralCompanion,
   buildSoldierEntity, buildHumanoidEntity,
   isSoldierLoaded, getButterflyProto,
-  scheduleGLTFUpgrade, upgradeEntitiesToGLTF,
+  // _ai is created later — wrap in arrows to defer the const lookup until
+  // call time (otherwise we hit TDZ on these names during this evaluation).
+  scheduleGLTFUpgrade: (...a) => scheduleGLTFUpgrade(...a),
+  upgradeEntitiesToGLTF: (...a) => upgradeEntitiesToGLTF(...a),
   speak,
 });
 const { buildLevel, disposeLevel } = _level;
