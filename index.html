@@ -177,6 +177,7 @@
 </script>
 <script type="module">
 import * as THREE from 'three';
+import { PointerLockControls } from 'three/addons/controls/PointerLockControls.js';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { FBXLoader } from 'three/addons/loaders/FBXLoader.js';
 import * as SkeletonUtils from 'three/addons/utils/SkeletonUtils.js';
@@ -210,6 +211,7 @@ import { maybeRunScreenshotMode } from './js/screenshot_mode.js';
 import { createScene } from './js/scene.js';
 import { makeCollider } from './js/collision.js';
 import { setupOverlay } from './js/overlay.js';
+import { createElevator } from './js/elevator.js';
 
 // Bridge: audio's death cry needs the TTS speak callback
 function playDeathCry(c) { _playDeathCry(c, speak); }
@@ -1008,57 +1010,20 @@ function showFloorTitle(n, name) {
 // Input
 // ============================================================
 const keys = {};
-const elevatorPanel = document.getElementById('elevatorPanel');
-const floorListEl = document.getElementById('floorList');
-
-function isElevatorOpen() { return elevatorPanel.style.display === 'flex'; }
-
-function openElevator() {
-  floorListEl.innerHTML = LEVELS.map((L, i) =>
-    `<button data-floor="${i}" class="${i===currentLevel?'cur':''}">${i+1}. ${L.name}</button>`
-  ).join('');
-  elevatorPanel.style.display = 'flex';
-  controls.unlock();
-}
-function closeElevator() {
-  elevatorPanel.style.display = 'none';
-  controls.lock();
-}
-// Elevator transition state machine.
-// Phases: closing → fadeout → rebuild → opening
-let elevatorTransition = null;
-
-function gotoFloor(i) {
-  if (i < 0 || i >= LEVELS.length) return;
-  if (!elevatorTransition) {
-    closeElevator();
-    if (i === currentLevel) return;
-    if (!elevator) { buildLevel(i, { spawnAtElevator: true }); return; }
-    elevatorTransition = { phase: 'closing', t: 0, target: i };
-    controls.unlock();
-    blip(440, 0.3, 0.18);
-    say(`电梯前往：${LEVELS[i].name}`, 2);
-    speak('旁白', `电梯前往 ${LEVELS[i].name}`);
-    return;
-  }
-  // Already in 'pulling' phase, picked floor → continue from closing
-  if (i === currentLevel) {
-    elevatorTransition = null;
-    controls.lock();
-    closeElevator();
-    return;
-  }
-  closeElevator();
-  elevatorTransition.phase = 'closing';
-  elevatorTransition.t = 0;
-  elevatorTransition.target = i;
-  blip(440, 0.3, 0.18);
-  say(`电梯前往：${LEVELS[i].name}`, 2);
-}
-floorListEl.addEventListener('click', e => {
-  const t = e.target.closest('button');
-  if (t) gotoFloor(parseInt(t.dataset.floor, 10));
+// Elevator UI + transition (see js/elevator.js).
+const _elev = createElevator({
+  LEVELS, controls,
+  getElevator: () => elevator,
+  getCurrentLevel: () => currentLevel,
+  buildLevel,
+  blip, say, speak,
 });
+const isElevatorOpen = _elev.isOpen;
+const closeElevator  = _elev.close;
+const gotoFloor      = _elev.gotoFloor;
+const tryEnterElevator = _elev.tryEnter;
+const tickElevator     = _elev.tickElevator;
+const isElevatorInTransition = _elev.isInTransition;
 
 addEventListener('keydown', e => {
   if (isElevatorOpen()) {
@@ -1127,7 +1092,7 @@ function leaveCorpse(mesh) {
 
 
 function tryInteract() {
-  if (elevatorTransition) return;
+  if (isElevatorInTransition()) return;
   const p = controls.getObject().position;
 
   // Boats — board / disembark.
@@ -1155,16 +1120,7 @@ function tryInteract() {
   if (elevator) {
     const dx = p.x - elevator.pos.x, dz = p.z - elevator.pos.z;
     if (dx*dx + dz*dz < 2.0*2.0) {
-      // Step into cabin, then show floor panel
-      elevatorTransition = { phase: 'pulling', t: 0, target: null };
-      controls.unlock();
-      blip(880, 0.18, 0.18);
-      setTimeout(() => {
-        // After 0.7s "pull in", show the panel; gotoFloor will continue the transition
-        if (elevatorTransition && elevatorTransition.target == null) {
-          openElevator();
-        }
-      }, 700);
+      tryEnterElevator();
       return;
     }
   }
@@ -1875,69 +1831,11 @@ function tick() {
   }
   if (elevator) {
     const dx = pp.x - elevator.pos.x, dz = pp.z - elevator.pos.z;
-    if (!elevatorTransition && dx*dx + dz*dz < 2.0*2.0) {
+    if (!isElevatorInTransition() && dx*dx + dz*dz < 2.0*2.0) {
       if (getSubTimer() <= 0) say('按 E 进入电梯', 0.4);
     }
-    if (elevator.btn) elevator.btn.material.color.setHSL(0.55, 0.8, 0.45 + Math.sin(t*4)*0.2);
-    // Animate doors based on doorOpen state (0 closed → 1 open)
-    const o = elevator.doorOpen;
-    elevator.dL.position.x = elevator.dLBaseX - (1 - o) * elevator.dLBaseX;
-    elevator.dR.position.x = elevator.dRBaseX - (1 - o) * elevator.dRBaseX;
   }
-
-  // Elevator transition state machine
-  if (elevatorTransition) {
-    const T = elevatorTransition;
-    T.t += dt;
-    if (T.phase === 'pulling') {
-      // Pull player into cabin
-      const targetX = elevator.pos.x;
-      const targetZ = elevator.pos.z;
-      const obj = controls.getObject();
-      const a = Math.min(T.t / 0.6, 1);
-      obj.position.x += (targetX - obj.position.x) * a * 0.4;
-      obj.position.z += (targetZ - obj.position.z) * a * 0.4;
-      obj.position.y = 1.7;
-      if (T.t > 0.6) { T.phase = 'closing'; T.t = 0; blip(440, 0.3, 0.18); }
-    } else if (T.phase === 'closing') {
-      const a = Math.min(T.t / 0.7, 1);
-      if (elevator) elevator.doorOpen = 1 - a;
-      if (T.t > 0.8) { T.phase = 'fadeout'; T.t = 0; }
-    } else if (T.phase === 'fadeout') {
-      flashEl.style.opacity = String(Math.min(T.t / 0.6, 1));
-      // Subtle motion sound
-      if (T.t > 0.6) {
-        T.phase = 'rebuild'; T.t = 0;
-        // Open elevator doors are now closed; show motion blip
-        say(`电梯运行中…… → ${LEVELS[T.target].name}`, 1.5);
-      }
-    } else if (T.phase === 'rebuild') {
-      if (T.t > 0.5) {
-        try {
-          buildLevel(T.target, { spawnAtElevator: true });
-        } catch (err) {
-          console.error('[elevator] buildLevel failed', err);
-          // Even on error, force the screen back so the player isn't stuck on black.
-        }
-        T.phase = 'fadein'; T.t = 0;
-      }
-    } else if (T.phase === 'fadein') {
-      flashEl.style.opacity = String(Math.max(0, 1 - T.t / 0.5));
-      if (T.t > 0.5) {
-        flashEl.style.opacity = '0';
-        T.phase = 'opening'; T.t = 0;
-        blip(660, 0.3, 0.18);
-      }
-    } else if (T.phase === 'opening') {
-      const a = Math.min(T.t / 0.9, 1);
-      if (elevator) elevator.doorOpen = a;
-      if (T.t > 1.0) {
-        flashEl.style.opacity = '0';
-        elevatorTransition = null;
-        try { controls.lock(); } catch {}
-      }
-    }
-  }
+  tickElevator(dt, t);
 
   scene.fog.far = LEVELS[currentLevel].fogFar - (1 - player.sanity) * 10;
 

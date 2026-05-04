@@ -55,6 +55,7 @@ MODULES = [
     'scene.js',
     'collision.js',
     'overlay.js',
+    'elevator.js',
     # Character builders — leaf files first, then the index.js facade.
     'characters/loaders.js', 'characters/nametag.js', 'characters/knife.js',
     'characters/hostile.js',
