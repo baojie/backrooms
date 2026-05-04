@@ -195,10 +195,6 @@ import {
 } from './js/tts.js';
 import { pickCompanionLine, COMPANION_LINES_GENERIC } from './js/lines.js';
 import {
-  buildMaze, buildOpen, buildParking, buildIndustrial,
-  buildClassrooms, buildCubicles, buildShelves, buildPlatforms,
-} from './js/maze.js';
-import {
   buildKnifeMesh, buildPistolMesh, buildAKMesh,
   buildRocketLauncherMesh, buildSprayCanMesh,
 } from './js/weapons.js';
@@ -208,11 +204,6 @@ import {
   buildProceduralCompanion, buildHumanoidEntity,
   buildGLTFGirl, buildSoldierEntity, buildCompanionMesh,
 } from './js/characters.js';
-const LAYOUT_BUILDERS = {
-  maze: buildMaze, open: buildOpen, parking: buildParking,
-  industrial: buildIndustrial, classrooms: buildClassrooms,
-  cubicles: buildCubicles, shelves: buildShelves, platforms: buildPlatforms,
-};
 
 // Bridge: audio's death cry needs the TTS speak callback
 function playDeathCry(c) { _playDeathCry(c, speak); }
@@ -503,10 +494,10 @@ function runCompanionKnifeCombat(c, dt, _t, rig) {
   }
 }
 
-// Layout dispatch lives in js/maze.js — assign result to the local `cells` ref.
-function buildLayout(layout) {
-  const fn = LAYOUT_BUILDERS[layout] || buildMaze;
-  cells = fn(GRID);
+// Each floor object in LEVELS carries its own `buildLayout(GRID)` function
+// (see js/floors/*); just call it and assign to the local `cells` ref.
+function buildLayout(cfg) {
+  cells = cfg.buildLayout(GRID);
 }
 
 // ============================================================
@@ -539,7 +530,7 @@ function buildLevel(n, opts = {}) {
   levelGroup = new THREE.Group();
   scene.add(levelGroup);
 
-  buildLayout(cfg.layout);
+  buildLayout(cfg);
 
   // Pool level: define the sunken-pool footprint up front so floor / pickup /
   // companion code can avoid placing things inside it.

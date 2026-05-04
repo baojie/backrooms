@@ -1,5 +1,6 @@
-// Layout builders. Each returns a 2D `cells` grid of { wall: boolean }.
-// Outer border is always walls; layout differs by floor theme.
+// Layout builders shared across floors. Each takes a grid size and returns a
+// 2D `cells` grid of `{ wall: boolean }`. Outer border is always walls;
+// per-floor flavor differs in wall pattern.
 
 function emptyGrid(GRID) {
   const cells = [];
@@ -71,7 +72,6 @@ export function buildIndustrial(GRID) {
       cells[rx][rz+dz].wall = true;
       cells[rx+w][rz+dz].wall = true;
     }
-    // Two doorways per room.
     cells[rx + Math.max(1, Math.floor(w/2))][rz].wall = false;
     cells[rx + w][rz + Math.max(1, Math.floor(h/2))].wall = false;
   }
@@ -86,7 +86,6 @@ export function buildClassrooms(GRID) {
     for (let z = 1; z < GRID-1; z++) cells[x][z].wall = true;
   for (let z = step; z < GRID-1; z += step)
     for (let x = 1; x < GRID-1; x++) cells[x][z].wall = true;
-  // Punch one doorway per wall segment.
   for (let x = step; x < GRID-1; x += step) {
     for (let z0 = 0; z0 < GRID-1; z0 += step) {
       const dz = z0 + 1 + Math.floor(Math.random() * (step - 2));
@@ -108,7 +107,7 @@ export function buildCubicles(GRID) {
   const step = 4;
   for (let x = step-1; x < GRID-1; x += step) {
     for (let z = 1; z < GRID-1; z++) {
-      if (z % step === Math.floor(step/2)) continue; // gap
+      if (z % step === Math.floor(step/2)) continue;
       cells[x][z].wall = true;
     }
   }
@@ -126,15 +125,14 @@ export function buildShelves(GRID) {
   const cells = emptyGrid(GRID);
   for (let z = 3; z < GRID-2; z += 3) {
     for (let x = 2; x < GRID-2; x++) {
-      if (Math.random() < 0.08) continue; // occasional gaps
+      if (Math.random() < 0.08) continue;
       cells[x][z].wall = true;
     }
   }
   return cells;
 }
 
-// Subway: two long parallel platform walls (the "track" between them) running
-// north-south, with periodic crossings.
+// Subway: two long parallel platform walls (the "track" between them).
 export function buildPlatforms(GRID) {
   const cells = emptyGrid(GRID);
   const lane1 = Math.floor(GRID / 3);

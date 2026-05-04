@@ -22,7 +22,7 @@ fi
 
 mkdir -p docs
 python3 - <<'PY'
-import re, subprocess, pathlib, sys
+import re, subprocess, pathlib, posixpath, sys
 
 ROOT  = pathlib.Path('.').resolve()
 SRC   = ROOT / 'index.html'
@@ -30,8 +30,19 @@ JSDIR = ROOT / 'js'
 OUT   = ROOT / 'docs' / 'index.html'
 
 # Inline order matches index.html's own import order (deps before consumers).
-MODULES = ['levels.js', 'textures.js', 'audio.js', 'tts.js', 'lines.js',
-           'maze.js', 'weapons.js', 'characters.js']
+# Paths are relative to JSDIR; subdirs are supported.
+MODULES = [
+    # Floor data — leaf layout module first, then per-floor configs.
+    'floors/_layouts.js',
+    'floors/01-yellow.js', 'floors/02-garage.js', 'floors/03-powerplant.js',
+    'floors/04-pool.js',   'floors/05-farm.js',    'floors/06-kindergarten.js',
+    'floors/07-office.js', 'floors/08-library.js', 'floors/09-subway.js',
+    'floors/10-rooftop.js',
+    # Aggregator + the rest.
+    'levels.js',
+    'textures.js', 'audio.js', 'tts.js', 'lines.js',
+    'weapons.js', 'characters.js',
+]
 
 html = SRC.read_text(encoding='utf-8')
 
@@ -45,13 +56,54 @@ EXPORT_DECL_RE = re.compile(
     re.MULTILINE,
 )
 
-def wrap_module(name: str, src: str) -> tuple[str, str]:
-    # Drop helper modules' `import ... from "three"` and `from "three/addons/..."`
-    # — THREE / GLTFLoader / FBXLoader / SkeletonUtils are imported once at
-    # the top of the main module and live in outer scope.
+# Match `import <spec> from "./path"` (any relative path). Used to rewrite
+# inter-module imports inside helper modules to destructure from the bundled
+# IIFE vars. Limited to single-line imports.
+LOCAL_IMPORT_RE = re.compile(
+    r"^[ \t]*import\s*(\{[^}]*\}|\*\s*as\s*[A-Za-z_$][\w$]*|[A-Za-z_$][\w$]*)"
+    r"\s*from\s*['\"](\.[\w./-]+)['\"]\s*;?\s*$",
+    re.MULTILINE,
+)
+
+def resolve_relative(importer_key: str, rel: str) -> str:
+    """`importer_key` is like 'floors/01-yellow.js'; `rel` like './_layouts.js'.
+    Returns a normalized key like 'floors/_layouts.js'."""
+    base_dir = posixpath.dirname(importer_key)
+    return posixpath.normpath(posixpath.join(base_dir, rel))
+
+def destructure(spec: str, var: str) -> str:
+    """Render an import-spec replacement as `const ... = <var>;`."""
+    if spec.startswith('{'):
+        inside = spec[1:-1]
+        parts = []
+        for raw in inside.split(','):
+            p = raw.strip()
+            if not p: continue
+            m2 = re.match(r"([A-Za-z_$][\w$]*)\s+as\s+([A-Za-z_$][\w$]*)", p)
+            parts.append(f'{m2.group(1)}: {m2.group(2)}' if m2 else p)
+        return 'const { ' + ', '.join(parts) + ' } = ' + var + ';'
+    if spec.startswith('*'):
+        alias = spec.split('as', 1)[1].strip()
+        return f'const {alias} = {var};'
+    return f'const {{ default: {spec} }} = {var};'
+
+def wrap_module(name: str, src: str, mod_vars_so_far: dict) -> tuple[str, str]:
+    # 1. Drop `import ... from "three"` / "three/addons/..." — these are
+    #    imported once at the top of the main module and live in outer scope.
     src = re.sub(r"^\s*import\s+[^;]+?from\s+['\"]three(?:/[^'\"]*)?['\"]\s*;?\s*$",
                  '', src, flags=re.MULTILINE)
-    # Collect exported names, then strip the `export ` keyword prefix.
+    # 2. Rewrite inter-module imports (`import X from './sibling.js'`) to
+    #    destructure from the previously bundled IIFE var.
+    def local_repl(mm):
+        spec, rel = mm.group(1).strip(), mm.group(2)
+        target = resolve_relative(name, rel)
+        var = mod_vars_so_far.get(target)
+        if not var:
+            sys.exit(f'[deploy] {name}: unresolved local import "{rel}" '
+                     f'(resolved to {target}; not yet bundled)')
+        return destructure(spec, var)
+    src = LOCAL_IMPORT_RE.sub(local_repl, src)
+    # 3. Collect exported names; then strip the `export ` keyword prefix.
     exports = []
     for em in EXPORT_DECL_RE.finditer(src):
         exports.append(em.group(1) or em.group(2))
@@ -68,40 +120,27 @@ def wrap_module(name: str, src: str) -> tuple[str, str]:
     return var, body
 
 bundle = ''
-mod_vars = {}  # 'levels.js' -> '__mod_levels'
+mod_vars = {}  # 'floors/01-yellow.js' -> '__mod_floors_01_yellow'
 for name in MODULES:
-    var, body = wrap_module(name, (JSDIR / name).read_text(encoding='utf-8'))
+    var, body = wrap_module(name, (JSDIR / name).read_text(encoding='utf-8'), mod_vars)
     mod_vars[name] = var
     bundle += body
 
-# Rewrite the main module: keep three imports, replace local imports with
-# destructuring from the corresponding wrapped IIFE.
+# Rewrite the main module: keep three imports, replace `./js/...` imports
+# with destructuring from the corresponding wrapped IIFE.
+MAIN_IMPORT_RE = re.compile(
+    r"import\s*(\{[^}]*\}|\*\s*as\s*[A-Za-z_$][\w$]*|[A-Za-z_$][\w$]*)"
+    r"\s*from\s*['\"]\./js/([\w./-]+)['\"]\s*;?",
+    re.DOTALL,
+)
 def rewrite_main(body: str) -> str:
-    # Match an import for a local file, possibly multi-line.
-    pat = re.compile(
-        r"import\s*(\{[^}]*\}|\*\s*as\s*[A-Za-z_$][\w$]*|[A-Za-z_$][\w$]*)\s*from\s*['\"]\./js/([\w./-]+)['\"]\s*;?",
-        re.DOTALL,
-    )
     def repl(mm):
         spec, fname = mm.group(1).strip(), mm.group(2)
         var = mod_vars.get(fname)
         if not var:
             return mm.group(0)  # leave unknown imports alone
-        if spec.startswith('{'):
-            # Convert `{ a, b as c }` -> `{ a, b: c }` for destructuring.
-            inside = spec[1:-1]
-            parts = []
-            for raw in inside.split(','):
-                p = raw.strip()
-                if not p: continue
-                m2 = re.match(r"([A-Za-z_$][\w$]*)\s+as\s+([A-Za-z_$][\w$]*)", p)
-                parts.append(f'{m2.group(1)}: {m2.group(2)}' if m2 else p)
-            return 'const { ' + ', '.join(parts) + ' } = ' + var + ';'
-        if spec.startswith('*'):
-            alias = spec.split('as', 1)[1].strip()
-            return f'const {alias} = {var};'
-        return f'const {{ default: {spec} }} = {var};'
-    return pat.sub(repl, body)
+        return destructure(spec, var)
+    return MAIN_IMPORT_RE.sub(repl, body)
 
 new_main = rewrite_main(mod_body)
 
