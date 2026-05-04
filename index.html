@@ -54,8 +54,8 @@ import {
   say, speak, whispers, setCompanions as _setCompanionsForTTS, tickSubtitle, getSubTimer,
 } from './js/tts.js';
 import { pickCompanionLine, COMPANION_LINES_GENERIC } from './js/lines.js';
-import { buildKnifeMesh } from './js/weapons.js';
-import { setupWeapons } from './js/weapons_setup.js';
+import { buildKnifeMesh } from './js/weapons/meshes.js';
+import { setupWeapons } from './js/weapons/setup.js';
 import { buildCompanionRoster } from './js/companion_roster.js';
 import { MAX_HP, createPlayerState, createSetWeapon } from './js/player_state.js';
 import {
@@ -65,7 +65,7 @@ import {
   buildGLTFGirl, buildSoldierEntity, buildCompanionMesh,
 } from './js/characters/index.js';
 import { findPathBFS, updateGuide as _updateGuide } from './js/guide.js';
-import { createWeaponFX } from './js/weapon_fx.js';
+import { createWeaponFX } from './js/weapons/fx.js';
 import { createCompanionAI } from './js/companion_ai.js';
 import { maybeRunScreenshotMode } from './js/screenshot_mode.js';
 import { createScene } from './js/scene.js';
@@ -78,7 +78,7 @@ import { createHazards } from './js/hazards.js';
 import { createEntities } from './js/entities.js';
 import { createPlayer } from './js/player.js';
 import { createPickups } from './js/pickups.js';
-import { createWeaponAnim } from './js/weapon_anim.js';
+import { createWeaponAnim } from './js/weapons/anim.js';
 import { createAtmosphere } from './js/atmosphere.js';
 import { createHUD } from './js/hud.js';
 import { createLevelBuilder } from './js/level.js';

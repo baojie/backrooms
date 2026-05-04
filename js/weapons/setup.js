@@ -18,7 +18,7 @@
 import {
   buildKnifeMesh, buildPistolMesh, buildAKMesh,
   buildRocketLauncherMesh, buildSprayCanMesh,
-} from './weapons.js';
+} from './meshes.js';
 import * as THREE from 'three';
 
 export function setupWeapons(camera) {
