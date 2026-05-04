@@ -199,24 +199,29 @@ function buildLevel(n, opts = {}) {
 
   levelGroup.add(new THREE.AmbientLight(cfg.ambient, 0.55));
 
-  // Lobby fixtures are wider/longer to read as classic 2×4ft fluorescent
-  // troffers; other floors keep the slimmer panel.
-  const panelGeom = cfg.style === 'lobby'
-    ? new THREE.BoxGeometry(1.2, 0.04, 0.6)
-    : new THREE.BoxGeometry(1.6, 0.05, 0.4);
-  const panelMat = new THREE.MeshBasicMaterial({ color: cfg.lightHex });
-  for (let x = 1; x < GRID-1; x += 3) {
-    for (let z = 1; z < GRID-1; z += 3) {
-      if (cells[x][z].wall) continue;
-      const wx = (x - GRID/2) * CELL, wz = (z - GRID/2) * CELL;
-      const light = new THREE.PointLight(cfg.lightHex, 1.2, 9, 1.6);
-      light.position.set(wx, WALL_HEIGHT - 0.2, wz);
-      levelGroup.add(light);
-      const panel = new THREE.Mesh(panelGeom, panelMat.clone());
-      panel.position.copy(light.position);
-      panel.position.y = WALL_HEIGHT - 0.05;
-      levelGroup.add(panel);
-      S.lights.push({ light, panel, base: 1.2, seed: Math.random()*100, broken: Math.random() < 0.08 });
+  // Ceiling-mounted fluorescent panels — only placed on floors that have a
+  // ceiling. Floors with hasCeiling:false (farm, rooftop) are open-sky and
+  // shouldn't have fixtures floating in mid-air.
+  if (cfg.hasCeiling) {
+    // Lobby fixtures are wider/longer to read as classic 2×4ft fluorescent
+    // troffers; other floors keep the slimmer panel.
+    const panelGeom = cfg.style === 'lobby'
+      ? new THREE.BoxGeometry(1.2, 0.04, 0.6)
+      : new THREE.BoxGeometry(1.6, 0.05, 0.4);
+    const panelMat = new THREE.MeshBasicMaterial({ color: cfg.lightHex });
+    for (let x = 1; x < GRID-1; x += 3) {
+      for (let z = 1; z < GRID-1; z += 3) {
+        if (cells[x][z].wall) continue;
+        const wx = (x - GRID/2) * CELL, wz = (z - GRID/2) * CELL;
+        const light = new THREE.PointLight(cfg.lightHex, 1.2, 9, 1.6);
+        light.position.set(wx, WALL_HEIGHT - 0.2, wz);
+        levelGroup.add(light);
+        const panel = new THREE.Mesh(panelGeom, panelMat.clone());
+        panel.position.copy(light.position);
+        panel.position.y = WALL_HEIGHT - 0.05;
+        levelGroup.add(panel);
+        S.lights.push({ light, panel, base: 1.2, seed: Math.random()*100, broken: Math.random() < 0.08 });
+      }
     }
   }
 
@@ -663,8 +668,10 @@ function spawnProps(cfg, openCells) {
   if (cfg.spawnProps) {
     cfg.spawnProps({
       THREE, levelGroup, GRID, CELL, WALL_HEIGHT, pick,
-      wallBoxes: S.wallBoxes, electricZones: S.electricZones,
-      toxicZones: S.toxicZones, moths: S.moths, pool: S.pool,
+      cells: S.cells, openCells,
+      wallBoxes: S.wallBoxes, lights: S.lights,
+      electricZones: S.electricZones, toxicZones: S.toxicZones,
+      moths: S.moths, boats: S.boats, pool: S.pool,
       getButterflyProto, makeNoiseTexture,
     });
   }

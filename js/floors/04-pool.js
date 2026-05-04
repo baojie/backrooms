@@ -5,7 +5,10 @@
 import { buildOpen } from './_layouts.js';
 
 export function spawnProps(ctx) {
-  const { THREE, levelGroup, GRID, CELL, WALL_HEIGHT, pick, wallBoxes, electricZones, toxicZones, moths, pool, getButterflyProto, makeNoiseTexture } = ctx;
+  const { THREE, levelGroup, GRID, CELL, WALL_HEIGHT, pick,
+          cells, openCells, wallBoxes,
+          lights, electricZones, toxicZones, moths, boats, pool,
+          getButterflyProto, makeNoiseTexture } = ctx;
   // Sunken indoor pool — single big rectangular pit cut into a tiled deck.
   // The deck strips around the pool are built in buildLevel; here we add
   // pool walls, pool bottom, dark water, white pillars, handrails, and a
@@ -223,11 +226,44 @@ export function spawnProps(ctx) {
     toxicZones.push({ x: wx, z: wz, r: 1.6, slime, bubbles, glow });
   }
 
-  // Boats removed: the redesigned pool is small + hazards are localised,
-  // so wading is the intended traversal mode.
+  // Wooden rowboats — board with E to glide over hazards safely. Floats
+  // on the pool surface so the player can step from the deck into one.
+  for (const [wx, wz] of inPoolPick(2)) {
+    const boat = new THREE.Group();
+    const woodMat = new THREE.MeshLambertMaterial({ color: 0x6b3a1a });
+    const trimMat = new THREE.MeshLambertMaterial({ color: 0x4a2810 });
+    const hull = new THREE.Mesh(new THREE.BoxGeometry(1.4, 0.35, 2.8), woodMat);
+    hull.position.y = surfY + 0.05;
+    boat.add(hull);
+    const well = new THREE.Mesh(new THREE.BoxGeometry(1.05, 0.2, 2.4), trimMat);
+    well.position.y = surfY + 0.20;
+    boat.add(well);
+    const bow = new THREE.Mesh(new THREE.ConeGeometry(0.7, 0.7, 4), woodMat);
+    bow.rotation.x = Math.PI / 2;
+    bow.rotation.z = Math.PI / 4;
+    bow.position.set(0, surfY + 0.05, 1.55);
+    boat.add(bow);
+    const stern = bow.clone();
+    stern.position.z = -1.55;
+    stern.rotation.x = -Math.PI / 2;
+    boat.add(stern);
+    const bench = new THREE.Mesh(new THREE.BoxGeometry(1.0, 0.08, 0.35), trimMat);
+    bench.position.y = surfY + 0.32;
+    boat.add(bench);
+    const oar = new THREE.Mesh(new THREE.CylinderGeometry(0.04, 0.04, 1.6, 6), woodMat);
+    oar.rotation.z = Math.PI / 2;
+    oar.position.set(0.7, surfY + 0.30, 0.2);
+    boat.add(oar);
+    boat.position.set(wx, 0, wz);
+    boat.rotation.y = Math.random() * Math.PI * 2;
+    levelGroup.add(boat);
+    boats.push({ mesh: boat, x: wx, z: wz, yaw: boat.rotation.y, occupied: false });
+  }
 
-  // Moths disabled per request — keep code path but spawn zero.
-  const NUM_MOTHS = 0;
+  // Moth swarm — fluttering insecticide-vulnerable hazards perched on the
+  // pool deck pillars. Quiet enough to set mood, loud enough to demand
+  // the spray-can weapon.
+  const NUM_MOTHS = 4;
   for (let i = 0; i < NUM_MOTHS; i++) {
     const moth = new THREE.Group();
     let wL = null, wR = null;

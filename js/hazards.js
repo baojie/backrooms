@@ -27,7 +27,7 @@ export function createHazards(ctx) {
   const {
     S,
     GRID, CELL,
-    controls, player, deathScreen, flashEl,
+    controls, player, deathScreen, flashEl, companions,
     leaveCorpse, playDeathCry, playStatic,
     say, speak,
   } = ctx;
@@ -36,7 +36,6 @@ export function createHazards(ctx) {
     const electricZones = S.electricZones;
     if (!electricZones.length) return;
     const pp = controls.getObject().position;
-    const companions = companions;
     for (const z of electricZones) {
       z.phase += dt * 14;
       const flicker = 0.6 + Math.abs(Math.sin(z.phase)) * 0.9 + Math.random() * 0.3;
@@ -73,7 +72,6 @@ export function createHazards(ctx) {
     const moths = S.moths;
     if (!moths.length) return;
     const pp = controls.getObject().position;
-    const companions = companions;
     const ALARM_R = 4.5;     // moths only attack when player is within this radius
     for (const m of moths) {
       if (!m.alive) {
@@ -181,7 +179,6 @@ export function createHazards(ctx) {
     const toxicZones = S.toxicZones;
     if (!toxicZones.length) return;
     const pp = controls.getObject().position;
-    const companions = companions;
     for (const z of toxicZones) {
       for (const b of z.bubbles) {
         b.mesh.position.y = b.baseY + Math.sin(t * 2.4 + b.seed) * 0.06;
