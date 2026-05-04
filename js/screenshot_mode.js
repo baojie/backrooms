@@ -64,11 +64,15 @@ export function maybeRunScreenshotMode(ctx) {
       _origRAF(waitForModels);
     }
   }
+  // Sweep the camera through ~270° in place. The team girls spawn around
+  // the player, so the final frame (when shotDone fires) is guaranteed to
+  // catch one or two of them in close-up regardless of their layout.
   function pump() {
     const now = (performance.now() - startTs) / 1000;
     if (now < runSec) {
       if (wantFloor) {
-        controls.getObject().rotation.y = Math.sin(now * 0.7) * 0.6;
+        const t = now / runSec;
+        controls.getObject().rotation.y = t * Math.PI * 1.5 - Math.PI * 0.4;
       }
       _origRAF(pump);
     } else {
