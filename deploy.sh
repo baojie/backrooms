@@ -63,6 +63,7 @@ MODULES = [
     'player.js',
     'pickups.js',
     'weapon_anim.js',
+    'atmosphere.js',
     # Character builders — leaf files first, then the index.js facade.
     'characters/loaders.js', 'characters/nametag.js', 'characters/knife.js',
     'characters/hostile.js',
