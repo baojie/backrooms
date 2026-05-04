@@ -80,9 +80,8 @@ if [ "$MODE" = "title" ]; then
   exit 0
 fi
 
-# Title screen first, then each floor.
-shoot "http://127.0.0.1:$PORT/index.html" "$SHOT_DIR/title.png"
-
+# Capture per-floor walks. (Use --title-only if you specifically want the
+# welcome-screen splash.)
 if [ -n "$ONE_FLOOR" ]; then
   FLOORS=("$ONE_FLOOR")
 else
