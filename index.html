@@ -217,6 +217,8 @@ import { setupInput } from './js/input.js';
 import { createHazards } from './js/hazards.js';
 import { createEntities } from './js/entities.js';
 import { createPlayer } from './js/player.js';
+import { createPickups } from './js/pickups.js';
+import { createWeaponAnim } from './js/weapon_anim.js';
 
 // Bridge: audio's death cry needs the TTS speak callback
 function playDeathCry(c) { _playDeathCry(c, speak); }
@@ -1149,6 +1151,20 @@ const { updatePlayerWakeup, updatePlayerMovement, updatePlayerDeath } = createPl
   buildProceduralCompanion, leaveCorpse,
 });
 
+// Pickups + held-weapon animation — see js/pickups.js, js/weapon_anim.js.
+const updatePickups = createPickups({
+  controls, player, MAX_HP, heldKnifePivot,
+  getLevelGroup: () => levelGroup,
+  getAlmonds:    () => almonds,
+  getKnives:     () => knives,
+  getMedkits:    () => medkits,
+  say, blip,
+});
+const updateWeaponAnim = createWeaponAnim({
+  WEAPONS, controls, player, heldKnifePivot,
+  fireGun, sprayInsecticide,
+});
+
 function tick() {
   const dt = Math.min(clock.getDelta(), 0.05);
   const t = clock.elapsedTime;
@@ -1166,90 +1182,9 @@ function tick() {
       L.panel.material.color.setRGB(0.95 * f, 0.9 * f, 0.6 * f);
   }
 
-  if (player.speedBoost > 0) player.speedBoost = Math.max(0, player.speedBoost - dt);
-  for (const a of almonds) {
-    if (!a.alive) continue;
-    a.mesh.rotation.y += dt * 1.5;
-    a.mesh.position.y = a.baseY + Math.sin(t * 2 + a.seed) * 0.06;
-    const dx = a.mesh.position.x - controls.getObject().position.x;
-    const dz = a.mesh.position.z - controls.getObject().position.z;
-    if (dx*dx + dz*dz < 0.7*0.7) {
-      a.alive = false;
-      levelGroup.remove(a.mesh); levelGroup.remove(a.glow);
-      player.sanity = Math.min(1, player.sanity + 0.35);
-      player.speedBoost = 8;
-      player.almondsCollected++;
-      say('饮下杏仁水。理智 +35%　速度 +45%（8秒）', 3);
-      blip(880, 0.18, 0.18); setTimeout(()=>blip(1320, 0.2, 0.15), 80);
-    }
-  }
-  for (const k of knives) {
-    if (!k.alive) continue;
-    k.mesh.rotation.y += dt * 2;
-    k.mesh.position.y = k.baseY + Math.sin(t * 2.5 + k.seed) * 0.08;
-    const dx = k.mesh.position.x - controls.getObject().position.x;
-    const dz = k.mesh.position.z - controls.getObject().position.z;
-    if (dx*dx + dz*dz < 0.7*0.7) {
-      k.alive = false;
-      levelGroup.remove(k.mesh); levelGroup.remove(k.glow);
-      player.hasKnife = true;
-      heldKnifePivot.visible = true;
-      say('拾起刀。空格 / 左键 挥砍', 3);
-      blip(660, 0.15, 0.18); setTimeout(()=>blip(990, 0.18, 0.15), 60);
-    }
-  }
-  for (const m of medkits) {
-    if (!m.alive) continue;
-    m.mesh.rotation.y += dt * 1.2;
-    m.mesh.position.y = m.baseY + Math.sin(t * 2.2 + m.seed) * 0.06;
-    const dx = m.mesh.position.x - controls.getObject().position.x;
-    const dz = m.mesh.position.z - controls.getObject().position.z;
-    if (dx*dx + dz*dz < 0.7*0.7 && player.hp < MAX_HP) {
-      const heal = Math.min(3000, MAX_HP - player.hp);
-      m.alive = false;
-      levelGroup.remove(m.mesh); levelGroup.remove(m.glow);
-      player.hp = Math.min(MAX_HP, player.hp + 3000);
-      say(`使用医药包。HP +${Math.ceil(heal)}`, 2.5);
-      blip(720, 0.15, 0.18); setTimeout(()=>blip(1080, 0.18, 0.15), 60);
-    }
-  }
-
-  // Knife swing animation
-  if (player.knifeSwing > 0) {
-    player.knifeSwing = Math.max(0, player.knifeSwing - dt);
-    const phase = 1 - player.knifeSwing / 0.35;
-    const swing = Math.sin(phase * Math.PI);
-    heldKnifePivot.rotation.x = -0.2 - swing * 1.4;
-    heldKnifePivot.rotation.z =  0.3 - swing * 0.6;
-  } else if (player.hasKnife) {
-    heldKnifePivot.rotation.x = -0.2 + Math.sin(t * 1.6) * 0.03;
-    heldKnifePivot.rotation.z =  0.3 + Math.sin(t * 1.2) * 0.02;
-  }
-
-  // Auto-fire for full-auto weapons while LMB is held
-  const wActive = WEAPONS[player.weapon];
-  if (player.mouseHeld && wActive && wActive.auto && controls.isLocked) {
-    if (wActive.kind === 'gun') fireGun();
-    else if (wActive.kind === 'spray') sprayInsecticide();
-  }
-  if (WEAPONS.spray && WEAPONS.spray.held.userData.mist) {
-    const mm = WEAPONS.spray.held.userData.mist.material;
-    mm.opacity = Math.max(0, mm.opacity - dt * 4.5);
-  }
-
-  // Gun recoil + idle bob (animates whichever gun is held)
-  const gunPivot = wActive && wActive.kind === 'gun' ? wActive.pivot : null;
-  if (gunPivot) {
-    if (player.gunRecoil > 0) {
-      player.gunRecoil = Math.max(0, player.gunRecoil - dt);
-      const k = player.gunRecoil / wActive.cooldown;
-      gunPivot.rotation.x = -k * wActive.recoilKick;
-      gunPivot.position.z = (player.weapon === 'ak47' ? -0.55 : -0.50) + k * 0.06;
-    } else {
-      gunPivot.rotation.x = Math.sin(t * 1.5) * 0.02;
-      gunPivot.position.z = (player.weapon === 'ak47' ? -0.55 : -0.50) + Math.sin(t * 1.2) * 0.005;
-    }
-  }
+  // Pickups + held-weapon animation — see js/pickups.js / js/weapon_anim.js.
+  updatePickups(dt, t);
+  updateWeaponAnim(dt, t);
 
   // Companions follow as a flock around the player
   const pp = controls.getObject().position;
