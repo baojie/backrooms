@@ -442,10 +442,29 @@ function disposeLevel() {
     }
   });
   levelGroup = null;
-  wallBoxes = []; lights = []; almonds = []; knives = []; medkits = []; entities = []; electricZones = []; toxicZones = []; boats = []; moths = []; stairExit = null; randomStair = null; elevator = null; pool = null; guide = null;
+  // Clear arrays IN PLACE so module factories (weapon_fx, companion_ai,
+  // hazards, entities) that captured these references at construction
+  // time continue to see the same array — never reassign with `[]`.
+  wallBoxes.length = 0;
+  lights.length = 0;
+  almonds.length = 0;
+  knives.length = 0;
+  medkits.length = 0;
+  entities.length = 0;
+  electricZones.length = 0;
+  toxicZones.length = 0;
+  boats.length = 0;
+  moths.length = 0;
+  rockets.length = 0;
+  // Per-level singletons reset to null — getters used by modules
+  // re-resolve each call so this propagates correctly.
+  stairExit = null;
+  randomStair = null;
+  elevator = null;
+  pool = null;
+  guide = null;
   player.boat = null;
   wallMeshRef = null;
-  rockets = [];
 }
 
 function buildLevel(n, opts = {}) {
