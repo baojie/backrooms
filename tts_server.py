@@ -3,7 +3,7 @@
 Minimal Piper TTS HTTP server for the Backrooms game.
 
 Usage:
-    python3 tts_server.py [--model PATH] [--port 8001]
+    python3 tts_server.py [--model PATH] [--port 6465]
 
 Endpoints:
     GET /tts?text=...&speaker=xiaowang|xiaoli|narrator
@@ -113,7 +113,7 @@ class Handler(BaseHTTPRequestHandler):
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--model", default=DEFAULT_MODEL)
-    ap.add_argument("--port", type=int, default=8001)
+    ap.add_argument("--port", type=int, default=6465)
     ap.add_argument("--host", default="127.0.0.1")
     args = ap.parse_args()
 

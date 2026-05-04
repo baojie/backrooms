@@ -29,7 +29,7 @@ export function tickSubtitle(dt) {
 export function getSubTimer() { return subTimer; }
 
 // ---------- Piper sidecar probe ----------
-const PIPER_URL = 'http://127.0.0.1:8001';
+const PIPER_URL = 'http://127.0.0.1:6465';
 let piperOK = null;
 let currentTTSAudio = null;
 
