@@ -4398,6 +4398,44 @@ function tick() {
 
 buildLevel(0);
 tick();
+
+// ============================================================
+// Auto-screenshot mode: ?shot=1[&floor=N][&run=N]
+// Bypasses the title overlay and pointer-lock requirement so headless
+// Chrome can render a real in-game frame. screenshot.sh drives this.
+// ============================================================
+(function () {
+  const params = new URLSearchParams(location.search);
+  if (!params.get('shot')) return;
+  const floor = Math.max(1, Math.min(LEVELS.length,
+    parseInt(params.get('floor') || '1', 10)));
+  const runSec = parseFloat(params.get('run') || '3');
+
+  overlay.style.display = 'none';
+  // PointerLockControls gates movement on `isLocked`; spoof it.
+  Object.defineProperty(controls, 'isLocked',
+    { value: true, configurable: true, writable: true });
+
+  buildLevel(floor - 1);
+  player.lyingDown = false;
+  player.standingUp = null;
+  player.hasWokenUp = true;
+
+  // Walk forward and pan the camera so the shot isn't always at spawn.
+  const startTs = performance.now();
+  function pump() {
+    const now = (performance.now() - startTs) / 1000;
+    if (now < runSec) {
+      keys['KeyW'] = true;
+      controls.getObject().rotation.y = now * 0.5;
+      requestAnimationFrame(pump);
+    } else {
+      keys['KeyW'] = false;
+      window.__shotReady = true;
+    }
+  }
+  requestAnimationFrame(pump);
+})();
 </script>
 </body>
 </html>
