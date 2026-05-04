@@ -15,10 +15,10 @@
 # Requires: google-chrome (or chromium), python3.
 
 set -e
-cd "$(dirname "$0")"
+cd "$(dirname "$0")/.."
 
 if [ ! -f docs/index.html ]; then
-  echo "[shot] docs/index.html missing — run ./deploy.sh first." >&2
+  echo "[shot] docs/index.html missing — run script/deploy.sh first." >&2
   exit 1
 fi
 
@@ -40,7 +40,7 @@ done
 
 # Floor names mirror LEVELS[*].name in js/levels.js — kept in sync by hand
 # because pulling them out at deploy time isn't worth the complexity.
-FLOOR_NAMES=(yellow garage powerplant pool farm kindergarten office library subway void)
+FLOOR_NAMES=(yellow garage powerplant pool farm kindergarten office library subway rooftop)
 
 SHA=$(git rev-parse --short HEAD 2>/dev/null || echo nogit)
 DIRTY=$(git diff --quiet 2>/dev/null && echo "" || echo "-dirty")
@@ -62,10 +62,12 @@ done
 
 shoot() {
   local url="$1" out="$2"
-  # --virtual-time-budget runs JS timers/RAF at full speed for N ms before
-  # capturing, so the game has time to load Three.js, build the level, and
-  # walk the simulated steps.
-  "$CHROME" \
+  # Real-time wait — no --virtual-time-budget. Shot mode in index.html
+  # hard-stops its own rAF loop after `run` seconds, which is the cue
+  # Chrome uses to consider the page settled and snap a screenshot.
+  # (--virtual-time-budget + --run-all-compositor-stages-before-draw both
+  # deadlock with our continuous WebGL loop — do not re-add.)
+  timeout 60 "$CHROME" \
     --headless=new \
     --disable-gpu \
     --hide-scrollbars \
@@ -73,8 +75,6 @@ shoot() {
     --user-data-dir="$TMPDIR" \
     --window-size=1280,800 \
     --enable-unsafe-swiftshader \
-    --virtual-time-budget=12000 \
-    --run-all-compositor-stages-before-draw \
     --screenshot="$PWD/$out" \
     "$url" \
     >/dev/null 2>&1
@@ -86,7 +86,7 @@ shoot() {
 }
 
 if [ "$MODE" = "title" ]; then
-  shoot "http://127.0.0.1:$PORT/index.html" "$SHOT_DIR/title.png"
+  shoot "http://127.0.0.1:$PORT/index.html?shot=1&run=2" "$SHOT_DIR/title.png"
   exit 0
 fi
 

@@ -13,7 +13,7 @@
 # Requires: python3, terser (apt install node-terser  OR  npm i -g terser).
 
 set -e
-cd "$(dirname "$0")"
+cd "$(dirname "$0")/.."
 
 if ! command -v terser >/dev/null 2>&1; then
   echo "[deploy] terser not found — install with: sudo apt install node-terser" >&2
