@@ -65,6 +65,7 @@ MODULES = [
     'weapon_anim.js',
     'atmosphere.js',
     'hud.js',
+    'level.js',
     # Character builders — leaf files first, then the index.js facade.
     'characters/loaders.js', 'characters/nametag.js', 'characters/knife.js',
     'characters/hostile.js',
