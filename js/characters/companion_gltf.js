@@ -174,12 +174,15 @@ export function buildQuaterniusGirl(palette, name, idx) {
   const entry = getQuaterniusGirl(idx);
   if (!entry) return null;
   const root = SkeletonUtils.clone(entry.proto);
-  // Quaternius models export in metres but the bind size varies — rescale
-  // to ~1.7m and rest the feet on y=0, same as the Capoeira path.
+  // Force-update the cloned skeleton's world matrices before measuring —
+  // otherwise SkinnedMesh bboxes come back in raw bind-pose units (tens of
+  // metres) and we shrink the model to invisibility.
+  root.updateMatrixWorld(true);
   const bbox = new THREE.Box3().setFromObject(root);
   const h = bbox.max.y - bbox.min.y;
   if (h > 0.001) {
     root.scale.setScalar(1.7 / h);
+    root.updateMatrixWorld(true);
     const bbox2 = new THREE.Box3().setFromObject(root);
     root.position.y -= bbox2.min.y;
   }
