@@ -18,7 +18,7 @@ set -e
 cd "$(dirname "$0")/.."
 
 if [ ! -f docs/index.html ]; then
-  echo "[shot] docs/index.html missing — run script/deploy.sh first." >&2
+  echo "[shot] docs/index.html missing — run ./deploy.sh first." >&2
   exit 1
 fi
 
@@ -62,21 +62,11 @@ done
 
 shoot() {
   local url="$1" out="$2"
-  # Real-time wait — no --virtual-time-budget. Shot mode in index.html
-  # hard-stops its own rAF loop after `run` seconds, which is the cue
-  # Chrome uses to consider the page settled and snap a screenshot.
-  # (--virtual-time-budget + --run-all-compositor-stages-before-draw both
-  # deadlock with our continuous WebGL loop — do not re-add.)
-  timeout 60 "$CHROME" \
-    --headless=new \
-    --disable-gpu \
-    --hide-scrollbars \
-    --no-sandbox \
-    --user-data-dir="$TMPDIR" \
-    --window-size=1280,800 \
-    --enable-unsafe-swiftshader \
-    --screenshot="$PWD/$out" \
-    "$url" \
+  # CDP-driven capture: launches chrome with --remote-debugging-port,
+  # waits for window.__shotReady === true (set once shot-mode finishes
+  # waiting on the FBX rig + walking), then Page.captureScreenshot.
+  # Plain --screenshot URL captures too early (before models load).
+  python3 "$(dirname "$0")/_capture.py" "$CHROME" "$url" "$out" --wait 35 \
     >/dev/null 2>&1
   if [ ! -s "$out" ]; then
     echo "[shot] failed: $url" >&2

@@ -13,7 +13,7 @@
 # Requires: python3, terser (apt install node-terser  OR  npm i -g terser).
 
 set -e
-cd "$(dirname "$0")/.."
+cd "$(dirname "$0")"
 
 if ! command -v terser >/dev/null 2>&1; then
   echo "[deploy] terser not found — install with: sudo apt install node-terser" >&2
@@ -46,9 +46,11 @@ EXPORT_DECL_RE = re.compile(
 )
 
 def wrap_module(name: str, src: str) -> tuple[str, str]:
-    # Drop helper modules' `import ... from "three"` — THREE is in outer scope.
-    src = re.sub(r"^\s*import\s+[^;]+?from\s+['\"]three['\"]\s*;?\s*$", '',
-                 src, flags=re.MULTILINE)
+    # Drop helper modules' `import ... from "three"` and `from "three/addons/..."`
+    # — THREE / GLTFLoader / FBXLoader / SkeletonUtils are imported once at
+    # the top of the main module and live in outer scope.
+    src = re.sub(r"^\s*import\s+[^;]+?from\s+['\"]three(?:/[^'\"]*)?['\"]\s*;?\s*$",
+                 '', src, flags=re.MULTILINE)
     # Collect exported names, then strip the `export ` keyword prefix.
     exports = []
     for em in EXPORT_DECL_RE.finditer(src):
