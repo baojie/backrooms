@@ -208,6 +208,7 @@ import { createWeaponFX } from './js/weapon_fx.js';
 import { createCompanionAI } from './js/companion_ai.js';
 import { maybeRunScreenshotMode } from './js/screenshot_mode.js';
 import { createScene } from './js/scene.js';
+import { makeCollider } from './js/collision.js';
 
 // Bridge: audio's death cry needs the TTS speak callback
 function playDeathCry(c) { _playDeathCry(c, speak); }
@@ -1266,24 +1267,8 @@ function resetAll() {
 }
 
 
-// ============================================================
-// Collision
-// ============================================================
-function collide(pos, radius=0.35) {
-  for (const w of wallBoxes) {
-    const hx = w.halfX ?? w.half, hz = w.halfZ ?? w.half;
-    const dx = pos.x - w.x, dz = pos.z - w.z;
-    if (Math.abs(dx) < hx + radius && Math.abs(dz) < hz + radius) {
-      const px = (hx + radius) - Math.abs(dx);
-      const pz = (hz + radius) - Math.abs(dz);
-      if (px < pz) pos.x += Math.sign(dx) * px;
-      else         pos.z += Math.sign(dz) * pz;
-    }
-  }
-  const limit = (GRID/2)*CELL - 1;
-  pos.x = Math.max(-limit, Math.min(limit, pos.x));
-  pos.z = Math.max(-limit, Math.min(limit, pos.z));
-}
+// Collision (see js/collision.js).
+const collide = makeCollider({ getWallBoxes: () => wallBoxes, GRID, CELL });
 
 // ============================================================
 // Game loop
