@@ -240,6 +240,15 @@ min_js = proc.stdout.strip()
 
 new_html = html[:m.start()] + mod_open + min_js + mod_close + html[m.end():]
 
+# Inline css/main.css in place of the <link rel="stylesheet"> so the
+# deployed docs/index.html stays a single self-contained file.
+css_text = (ROOT / 'css' / 'main.css').read_text(encoding='utf-8')
+new_html = re.sub(
+    r'<link\s+rel="stylesheet"\s+href="css/main\.css"\s*/?>',
+    '<style>' + css_text + '</style>',
+    new_html, count=1,
+)
+
 # Light HTML minification: drop comments and collapse whitespace outside of
 # <script>/<style> blocks (preserving their bodies).
 def minify_html(s: str) -> str:

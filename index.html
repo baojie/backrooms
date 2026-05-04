@@ -3,68 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <title>后室 / The Backrooms</title>
-<style>
-  html, body { margin: 0; padding: 0; overflow: hidden; background: #000;
-    font-family: 'Microsoft YaHei', 'PingFang SC', 'Noto Sans CJK SC', sans-serif; color: #d4c87a; }
-  #hud {
-    position: fixed; top: 12px; left: 12px; pointer-events: none;
-    font-size: 14px; text-shadow: 0 0 4px #000, 0 0 8px #000;
-    line-height: 1.5;
-  }
-  #hud .bar { width: 180px; height: 8px; background: rgba(0,0,0,0.5); border: 1px solid #5a4f1f; margin-top: 2px; }
-  #hud .fill { height: 100%; background: #d4c87a; transition: width .2s; }
-  #hud .fill.sanity { background: #b86b6b; }
-  #hud .fill.hp { background: #d46b6b; }
-  #floorTag { position: fixed; top: 12px; right: 16px; font-size: 20px;
-    font-weight: 600; letter-spacing: 0.5px;
-    background: rgba(0,0,0,0.45); padding: 6px 12px; border-radius: 4px;
-    border: 1px solid rgba(232, 217, 122, 0.35);
-    text-shadow: 0 0 4px #000, 0 0 8px #000; color: #e8d97a; pointer-events: none; }
-  #team { position: fixed; bottom: 12px; left: 12px; font-size: 13px;
-    text-shadow: 0 0 4px #000; pointer-events: none; line-height: 1.4; }
-  #team .member { margin-bottom: 4px; }
-  #team .name { display: inline-block; min-width: 56px; }
-  #team .bar { display: inline-block; width: 80px; height: 6px; background: rgba(0,0,0,0.5); border:1px solid #444; vertical-align: middle; }
-  #team .bar .fill { height: 100%; background: #6bd47a; }
-  #overlay {
-    position: fixed; inset: 0; display: flex; align-items: center; justify-content: center;
-    background: rgba(0,0,0,0.88); color: #d4c87a; text-align: center;
-    cursor: pointer; z-index: 10;
-  }
-  #overlay .panel { max-width: 580px; padding: 24px; }
-  #overlay h1 { font-size: 38px; letter-spacing: 6px; margin: 0 0 12px; color: #e8d97a; }
-  #overlay p { line-height: 1.7; font-size: 14px; }
-  #overlay .key { color: #fff; background: #2a2410; padding: 2px 6px; border: 1px solid #5a4f1f; }
-  #vignette { position: fixed; inset: 0; pointer-events: none; z-index: 5;
-    box-shadow: inset 0 0 220px 80px rgba(0,0,0,0.85); }
-  #flash { position: fixed; inset: 0; pointer-events: none; z-index: 6;
-    background: #000; opacity: 0; transition: opacity 60ms; }
-  #subtitle { position: fixed; bottom: 80px; left: 0; right: 0; text-align: center;
-    font-size: 16px; color: #d4c87a; text-shadow: 0 0 6px #000;
-    pointer-events: none; opacity: 0; transition: opacity .4s; }
-  #floorTitle { position: fixed; inset: 0; display: flex; align-items: center; justify-content: center;
-    color: #fff; font-size: 36px; letter-spacing: 8px; pointer-events: none; opacity: 0;
-    transition: opacity 1.2s; z-index: 7; text-shadow: 0 0 12px #000; }
-  #deathScreen { position: fixed; inset: 0; display: none; align-items: center; justify-content: center;
-    background: rgba(20,0,0,0.92); color: #c44; text-align: center; z-index: 20; cursor: pointer; }
-  #deathScreen h1 { font-size: 52px; letter-spacing: 8px; }
-  #deathScreen p { color: #888; }
-  #winScreen { position: fixed; inset: 0; display: none; align-items: center; justify-content: center;
-    background: rgba(0,0,0,0.95); color: #f3e9a0; text-align: center; z-index: 20; cursor: pointer; }
-  #winScreen h1 { font-size: 48px; letter-spacing: 6px; }
-  #elevatorPanel { position: fixed; inset: 0; display: none; align-items: center; justify-content: center;
-    background: rgba(0,0,0,0.78); z-index: 15; }
-  #elevatorPanel .box { background: #161616; border: 2px solid #555; border-radius: 6px;
-    padding: 22px 26px; color: #d4c87a; min-width: 320px; box-shadow: 0 0 24px #000; }
-  #elevatorPanel h2 { margin: 0 0 14px; font-size: 22px; letter-spacing: 4px; color: #f3e9a0; text-align:center; }
-  #elevatorPanel .floors { display: grid; grid-template-columns: repeat(2, 1fr); gap: 6px; }
-  #elevatorPanel button { background: #2a2a2a; color: #e8d97a; border: 1px solid #555;
-    padding: 8px 10px; font-size: 14px; cursor: pointer; text-align: left;
-    font-family: inherit; transition: background .15s; }
-  #elevatorPanel button:hover { background: #4a3a1a; color: #fff; }
-  #elevatorPanel button.cur { background: #553311; color: #fff; }
-  #elevatorPanel .hint { margin-top: 12px; font-size: 11px; color: #888; text-align:center; }
-</style>
+<link rel="stylesheet" href="css/main.css">
 </head>
 <body>
 
