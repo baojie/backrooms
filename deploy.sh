@@ -48,6 +48,7 @@ MODULES = [
     'levels.js',
     'textures.js', 'audio.js', 'tts.js', 'lines.js',
     'weapons.js',
+    'guide.js',
     # Character builders — leaf files first, then the index.js facade.
     'characters/loaders.js', 'characters/nametag.js', 'characters/knife.js',
     'characters/hostile.js',
