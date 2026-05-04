@@ -38,6 +38,7 @@ export function createCompanionAI(ctx) {
     isSoldierLoaded, isGirlLoaded,
     buildSoldierEntity, buildGLTFGirl, attachCompanionKnife,
     collide, blip, say, speak,
+    pickCompanionLine, getCurrentLevel, MAX_HP, player,
   } = ctx;
 
   // Companion knife AI — runs for both GLTF girls (rig=null) and
@@ -256,9 +257,40 @@ export function createCompanionAI(ctx) {
     }
   }
 
+  // Periodic companion chatter — every 8–16s pick a living companion
+  // and have it say a context-aware line based on nearby entity
+  // distance, sanity, hp%, and current floor.
+  let companionLineCooldown = 5;
+  function tickCompanionChatter(dt) {
+    companionLineCooldown -= dt;
+    if (companionLineCooldown > 0) return;
+    const alive = companions.filter(c => c.alive);
+    if (alive.length) {
+      const c = alive[Math.floor(Math.random()*alive.length)];
+      let nearestEntityDist = Infinity;
+      const pp = controls.getObject().position;
+      for (const ee of entities) {
+        const d = ee.mesh.position.distanceTo(pp);
+        if (d < nearestEntityDist) nearestEntityDist = d;
+      }
+      const raw = pickCompanionLine(c.name, {
+        nearestEntityDist,
+        sanity: player.sanity,
+        hp: player.hp / MAX_HP,
+        speedBoost: player.speedBoost,
+        currentLevel: getCurrentLevel(),
+      });
+      const line = `${c.name}：「${raw}」`;
+      say(line, 4);
+      speak(c.name, line);
+    }
+    companionLineCooldown = 8 + Math.random()*8;
+  }
+
   return {
     runCompanionKnifeCombat,
     updateCompanions,
+    tickCompanionChatter,
     upgradeEntitiesToGLTF,
     scheduleGLTFUpgrade,
     isGLTFUpgradeComplete,

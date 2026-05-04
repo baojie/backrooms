@@ -1077,7 +1077,6 @@ const collide = makeCollider({ getWallBoxes: () => wallBoxes, GRID, CELL });
 // ============================================================
 const clock = new THREE.Clock();
 const flashEl = document.getElementById('flash');
-let companionLineCooldown = 5;
 
 // Bind the weapon-firing helpers to the live game state. The closure
 // captures references to the mutable arrays (entities, companions, etc.)
@@ -1106,8 +1105,9 @@ const _ai = createCompanionAI({
   isSoldierLoaded, isGirlLoaded,
   buildSoldierEntity, buildGLTFGirl, attachCompanionKnife,
   collide, blip, say, speak,
+  pickCompanionLine, getCurrentLevel: () => currentLevel, MAX_HP, player,
 });
-const { updateCompanions, upgradeEntitiesToGLTF,
+const { updateCompanions, tickCompanionChatter, upgradeEntitiesToGLTF,
         scheduleGLTFUpgrade, isGLTFUpgradeComplete } = _ai;
 
 // Keyboard + mouse input (see js/input.js). The same `keys` map is
@@ -1192,6 +1192,15 @@ const updateHUD = createHUD({
   say, getSubTimer,
 });
 
+// Guide ctx — stable references; per-frame the closure derefs the live
+// `guide`, `stairExit`, `cells` bindings via property access.
+const _guideCtx = {
+  get guide()      { return guide; },
+  get stairExit()  { return stairExit; },
+  get cells()      { return cells; },
+  controls, GRID, CELL, collide,
+};
+
 function tick() {
   const dt = Math.min(clock.getDelta(), 0.05);
   const t = clock.elapsedTime;
@@ -1199,15 +1208,6 @@ function tick() {
   // Wake-up + movement + flashlight battery — see js/player.js.
   updatePlayerWakeup(dt);
   updatePlayerMovement(dt, t);
-
-  // Light flicker (level-spawned fluorescents) + pickup proximity scans.
-  for (const L of lights) {
-    if (L.broken) { L.light.intensity = 0; continue; }
-    const f = 0.85 + Math.sin(t * 30 + L.seed) * 0.05 + (Math.random() < 0.005 ? -0.6 : 0);
-    L.light.intensity = L.base * Math.max(0.1, f);
-    if (L.panel && L.panel.material && L.panel.material.color)
-      L.panel.material.color.setRGB(0.95 * f, 0.9 * f, 0.6 * f);
-  }
 
   // Pickups + held-weapon animation — see js/pickups.js / js/weapon_anim.js.
   updatePickups(dt, t);
@@ -1217,32 +1217,8 @@ function tick() {
   const pp = controls.getObject().position;
   updateCompanions(dt, t);
 
-  companionLineCooldown -= dt;
-  if (companionLineCooldown <= 0) {
-    const alive = companions.filter(c => c.alive);
-    if (alive.length) {
-      const c = alive[Math.floor(Math.random()*alive.length)];
-      let nearestEntityDist = Infinity;
-      const _pp = controls.getObject().position;
-      for (const ee of entities) {
-        const _d = ee.mesh.position.distanceTo(_pp);
-        if (_d < nearestEntityDist) nearestEntityDist = _d;
-      }
-      const raw = pickCompanionLine(c.name, {
-        nearestEntityDist,
-        sanity: player.sanity,
-        hp: player.hp / MAX_HP,
-        speedBoost: player.speedBoost,
-        currentLevel,
-      });
-      const line = `${c.name}：「${raw}」`;
-      say(line, 4);
-      speak(c.name, line);
-    }
-    companionLineCooldown = 8 + Math.random()*8;
-  }
-
-  _updateGuide(dt, t, { guide, controls, stairExit, cells, GRID, CELL, collide });
+  tickCompanionChatter(dt);
+  _updateGuide(dt, t, _guideCtx);
 
   // Rocket projectiles + entity AI — see js/weapon_fx.js / js/entities.js.
   tickRockets(dt);

@@ -33,8 +33,15 @@ export function createAtmosphere(ctx) {
     const lights = getLights();
     const entities = getEntities();
 
+    // Light flicker (level-spawned fluorescents): random brightness wobble
+    // + occasional dropouts, panel surface tint follows the bulb.
     let nearestLightDist = Infinity;
-    for (const L of lights) if (!L.broken) {
+    for (const L of lights) {
+      if (L.broken) { L.light.intensity = 0; continue; }
+      const f = 0.85 + Math.sin(t * 30 + L.seed) * 0.05 + (Math.random() < 0.005 ? -0.6 : 0);
+      L.light.intensity = L.base * Math.max(0.1, f);
+      if (L.panel && L.panel.material && L.panel.material.color)
+        L.panel.material.color.setRGB(0.95 * f, 0.9 * f, 0.6 * f);
       const d = L.light.position.distanceTo(pp);
       if (d < nearestLightDist) nearestLightDist = d;
     }
