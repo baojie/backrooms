@@ -69,6 +69,7 @@ MODULES = [
     'atmosphere.js',
     'hud.js',
     'level.js',
+    'dom_setup.js',
     # Character builders — leaf files first, then the index.js facade.
     'characters/loaders.js', 'characters/nametag.js', 'characters/knife.js',
     'characters/hostile.js',
