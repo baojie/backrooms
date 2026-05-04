@@ -213,6 +213,7 @@ import { makeCollider } from './js/collision.js';
 import { setupOverlay } from './js/overlay.js';
 import { createElevator } from './js/elevator.js';
 import { leaveCorpse, createInteract } from './js/interact.js';
+import { setupInput } from './js/input.js';
 
 // Bridge: audio's death cry needs the TTS speak callback
 function playDeathCry(c) { _playDeathCry(c, speak); }
@@ -1026,61 +1027,6 @@ const tryEnterElevator = _elev.tryEnter;
 const tickElevator     = _elev.tickElevator;
 const isElevatorInTransition = _elev.isInTransition;
 
-addEventListener('keydown', e => {
-  if (isElevatorOpen()) {
-    if (e.code === 'Escape') { closeElevator(); return; }
-    if (e.code >= 'Digit1' && e.code <= 'Digit9') {
-      gotoFloor(parseInt(e.code.slice(5), 10) - 1); return;
-    }
-    if (e.code === 'Digit0') { gotoFloor(9); return; }
-    return;
-  }
-  if (e.code === 'Enter') {
-    if (overlay.style.display !== 'none') { startGame(); return; }
-    if (deathScreen.style.display === 'flex') { deathScreen.click(); return; }
-    if (winScreen.style.display === 'flex') { winScreen.click(); return; }
-  }
-  // Shift + digit: jump to floor (1-9 → floor 1-9, 0 → floor 10)
-  if (e.shiftKey && e.code >= 'Digit0' && e.code <= 'Digit9') {
-    const d = parseInt(e.code.slice(5), 10);
-    const idx = d === 0 ? 9 : d - 1;
-    if (idx < LEVELS.length) { e.preventDefault(); gotoFloor(idx); return; }
-  }
-  keys[e.code] = true;
-  if (e.code === 'KeyF') player.flashlightOn = !player.flashlightOn;
-  if (e.code === 'KeyE') tryInteract();
-  if (e.code === 'Digit1') setWeapon('pistol');
-  else if (e.code === 'Digit2') setWeapon('ak47');
-  else if (e.code === 'Digit3') setWeapon('knife');
-  else if (e.code === 'Digit4') setWeapon('rocket');
-  else if (e.code === 'Digit5') setWeapon('spray');
-  else if (e.code === 'KeyQ') {
-    const idx = WEAPON_ORDER.indexOf(player.weapon);
-    setWeapon(WEAPON_ORDER[(idx + 1) % WEAPON_ORDER.length]);
-  }
-  if (e.code === 'Space') { e.preventDefault(); useWeapon(); }
-});
-addEventListener('keyup', e => {
-  keys[e.code] = false;
-});
-addEventListener('mousedown', e => {
-  if (e.button !== 0) return;
-  if (controls.isLocked) {
-    player.mouseHeld = true;
-    useWeapon();
-    return;
-  }
-  if (overlay.style.display === 'none'
-      && deathScreen.style.display !== 'flex'
-      && winScreen.style.display !== 'flex'
-      && !isElevatorOpen()) {
-    try { controls.lock(); } catch {}
-  }
-});
-addEventListener('mouseup', e => {
-  if (e.button === 0) player.mouseHeld = false;
-});
-
 // Interact (E key) + leaveCorpse helper (see js/interact.js).
 const tryInteract = createInteract({
   LEVELS, controls, player,
@@ -1141,6 +1087,16 @@ const _ai = createCompanionAI({
 });
 const { updateCompanions, upgradeEntitiesToGLTF,
         scheduleGLTFUpgrade, isGLTFUpgradeComplete } = _ai;
+
+// Keyboard + mouse input (see js/input.js). The same `keys` map is
+// passed in so the listeners and the tick() loop share one reference.
+setupInput({
+  LEVELS, WEAPON_ORDER, controls, player, keys,
+  overlay, deathScreen, winScreen,
+  isElevatorOpen, closeElevator, gotoFloor,
+  startGame, tryInteract,
+  setWeapon, useWeapon,
+});
 
 function tick() {
   const dt = Math.min(clock.getDelta(), 0.05);
