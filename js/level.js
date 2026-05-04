@@ -111,13 +111,11 @@ function buildLevel(n, opts = {}) {
   buildLayout(cfg);
   cells = S.cells;   // sync the local alias after buildLayout writes S.cells
 
-  // Pool level: the entire grid is one big sunken pool — only a thin 2m
-  // strip of deck around the outside edge so the outer walls have
-  // somewhere to plant. companion / pickup / spawn code uses this
-  // footprint to filter where things land.
+  // Pool level: a big square pool centred on the floor with a generous
+  // deck strip (~10m wide) around it on all four sides — the deck
+  // hosts the spawn, pickups, stairs, and the railed pool edge.
   if (cfg.props === 'water') {
-    const half = (GRID / 2) * CELL;       // 54
-    pool = { x: 0, z: 0, halfX: half - 2, halfZ: half - 2,
+    pool = { x: 0, z: 0, halfX: 44, halfZ: 44,
              surfaceY: -0.20, bottomY: -1.6 };
     S.pool = pool;
   }
@@ -242,11 +240,11 @@ function buildLevel(n, opts = {}) {
 
   let spawnX = 0, spawnZ = 0;
   if (pool) {
-    // Pool covers the whole floor — spawn near the back wall, inside the
-    // pool, facing toward center so the player sees the room stretching
-    // ahead with hazards and boats scattered across the water.
+    const _half = (GRID/2) * CELL;
+    // Spawn on the deck strip outside the pool, halfway between the
+    // pool edge and the outer wall.
     spawnX = 0;
-    spawnZ = pool.halfZ - 4;
+    spawnZ = (pool.halfZ + _half) / 2;
   } else {
     outer: for (let r = 0; r < 5; r++) {
       for (let dx = -r; dx <= r; dx++)
@@ -280,13 +278,10 @@ function buildLevel(n, opts = {}) {
   const almondCapGeom  = new THREE.CylinderGeometry(0.06, 0.06, 0.06, 10);
   const almondBodyMat  = new THREE.MeshBasicMaterial({ color: 0xf6e29a, transparent: true, opacity: 0.85 });
   const almondCapMat   = new THREE.MeshBasicMaterial({ color: 0x6b5018 });
-  // Pickups + stair placement avoid the sunken pool — except when the
-  // pool fills almost the whole floor (no real deck), in which case
-  // they have to go in the water and the player will need a boat.
-  const _half = (GRID/2) * CELL;
-  const _poolFillsFloor = pool && pool.halfX > _half - 4 && pool.halfZ > _half - 4;
+  // Pickups + stair placement avoid the sunken pool footprint — they
+  // go on the surrounding deck where the player can walk dry.
   const isOnDeck = ([cx, cz]) => {
-    if (!pool || _poolFillsFloor) return true;
+    if (!pool) return true;
     const wx = (cx - GRID/2) * CELL, wz = (cz - GRID/2) * CELL;
     return Math.abs(wx - pool.x) > pool.halfX + 1.0
         || Math.abs(wz - pool.z) > pool.halfZ + 1.0;

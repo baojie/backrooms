@@ -65,24 +65,83 @@ export function spawnProps(ctx) {
   water.position.set(pool.x, pool.surfaceY, pool.z);
   levelGroup.add(water);
 
-  // White square pillars rising out of the water in a regular grid.
-  // The pool now fills the whole floor, so the pillars give it scale +
-  // something to navigate around in a boat. Each pillar plants its base
-  // in the pool bottom and extends to the ceiling.
   const pillarMat = new THREE.MeshLambertMaterial({ map: tileLightTex });
   const pillarSide = 1.2;
-  const pillarH = WALL_HEIGHT - pool.bottomY;     // ceiling - pool bottom
-  const pillarGeom = new THREE.BoxGeometry(pillarSide, pillarH, pillarSide);
-  const pillarStep = 14;
-  const pillarLimit = pool.halfX - 6;
-  for (let xx = -pillarLimit; xx <= pillarLimit + 0.01; xx += pillarStep) {
-    for (let zz = -pillarLimit; zz <= pillarLimit + 0.01; zz += pillarStep) {
-      const p = new THREE.Mesh(pillarGeom, pillarMat);
-      p.position.set(xx, pool.bottomY + pillarH / 2, zz);
+
+  // Deck pillars — square columns standing on the deck just outside
+  // the pool's railed edge, three per long side and one per short side.
+  const deckPillarH = WALL_HEIGHT;
+  const deckPillarGeom = new THREE.BoxGeometry(pillarSide, deckPillarH, pillarSide);
+  const off = 2.0;   // distance from pool edge to pillar centre
+  const deckPillarPos = [
+    [-pool.halfX + 4, +pool.halfZ + off],
+    [ 0,              +pool.halfZ + off],
+    [+pool.halfX - 4, +pool.halfZ + off],
+    [-pool.halfX + 4, -pool.halfZ - off],
+    [ 0,              -pool.halfZ - off],
+    [+pool.halfX - 4, -pool.halfZ - off],
+    [+pool.halfX + off, 0],
+    [-pool.halfX - off, 0],
+  ];
+  for (const [px, pz] of deckPillarPos) {
+    const p = new THREE.Mesh(deckPillarGeom, pillarMat);
+    p.position.set(px, deckPillarH / 2, pz);
+    levelGroup.add(p);
+    wallBoxes.push({ x: px, z: pz, half: pillarSide / 2 });
+  }
+
+  // In-pool pillars rising from the pool bottom to the ceiling, on a
+  // sparse grid so a rowboat can navigate between them.
+  const inPillarH = WALL_HEIGHT - pool.bottomY;
+  const inPillarGeom = new THREE.BoxGeometry(pillarSide, inPillarH, pillarSide);
+  const inPillarStep = 16;
+  const inPillarLimit = pool.halfX - 8;
+  for (let xx = -inPillarLimit; xx <= inPillarLimit + 0.01; xx += inPillarStep) {
+    for (let zz = -inPillarLimit; zz <= inPillarLimit + 0.01; zz += inPillarStep) {
+      const p = new THREE.Mesh(inPillarGeom, pillarMat);
+      p.position.set(xx, pool.bottomY + inPillarH / 2, zz);
       levelGroup.add(p);
       wallBoxes.push({ x: xx, z: zz, half: pillarSide / 2 });
     }
   }
+
+  // Metal handrails along the four pool edges.
+  const railMat = new THREE.MeshLambertMaterial({ color: 0x9aa0a6, emissive: 0x202020 });
+  const railR = 0.05;
+  const railH = 0.95;
+  const railOff = 0.25;
+  function addRail(x1, z1, x2, z2) {
+    const dx = x2 - x1, dz = z2 - z1;
+    const len = Math.hypot(dx, dz);
+    const r = new THREE.Mesh(
+      new THREE.CylinderGeometry(railR, railR, len, 8), railMat
+    );
+    r.position.set((x1 + x2) / 2, railH, (z1 + z2) / 2);
+    r.rotation.z = Math.PI / 2;
+    r.rotation.y = -Math.atan2(dz, dx);
+    levelGroup.add(r);
+  }
+  const postGeom = new THREE.CylinderGeometry(0.04, 0.04, railH, 8);
+  function addPost(x, z) {
+    const p = new THREE.Mesh(postGeom, railMat);
+    p.position.set(x, railH / 2, z);
+    levelGroup.add(p);
+  }
+  const x0 = pool.x - pool.halfX - railOff;
+  const x1 = pool.x + pool.halfX + railOff;
+  const z0 = pool.z - pool.halfZ - railOff;
+  const z1 = pool.z + pool.halfZ + railOff;
+  addRail(x0, z0, x1, z0);
+  addRail(x0, z1, x1, z1);
+  addRail(x0, z0, x0, z1);
+  addRail(x1, z0, x1, z1);
+  for (let xx = x0; xx <= x1 + 0.01; xx += 6) {
+    addPost(xx, z0); addPost(xx, z1);
+  }
+  for (let zz = z0; zz <= z1 + 0.01; zz += 6) {
+    addPost(x0, zz); addPost(x1, zz);
+  }
+  addPost(x0, z0); addPost(x0, z1); addPost(x1, z0); addPost(x1, z1);
 
   // Dense rectangular fluorescent ceiling panels in a regular grid. The
   // panels are MeshBasic (no shader cost), but each PointLight eats
