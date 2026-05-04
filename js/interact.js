@@ -9,11 +9,11 @@
 //
 // ctx shape:
 //   LEVELS, controls, player           — read state
-//   getBoats(), getElevator(), getStairExit(), getRandomStair()
+//   S.boats, S.elevator, S.stairExit, S.randomStair
 //                                       — current level objects (rebuilt
 //                                         on each transition; getters
 //                                         keep the closure valid)
-//   getCurrentLevel()                   — current floor index
+//   S.currentLevel                   — current floor index
 //   buildLevel(i)                       — for stair / random-stair warp
 //   tryEnterElevator(),
 //   isElevatorInTransition()            — bridge to js/elevator.js
@@ -35,9 +35,8 @@ export function leaveCorpse(mesh) {
 
 export function createInteract(ctx) {
   const {
+    S,
     LEVELS, controls, player,
-    getBoats, getElevator, getStairExit, getRandomStair,
-    getCurrentLevel,
     buildLevel,
     tryEnterElevator, isElevatorInTransition,
     say, speak, blip,
@@ -58,7 +57,7 @@ export function createInteract(ctx) {
       say('下船', 1.2);
       return;
     }
-    for (const b of getBoats()) {
+    for (const b of S.boats) {
       const dx = p.x - b.x, dz = p.z - b.z;
       if (dx*dx + dz*dz < 2.2*2.2) {
         b.occupied = true;
@@ -69,7 +68,7 @@ export function createInteract(ctx) {
       }
     }
 
-    const elevator = getElevator();
+    const elevator = S.elevator;
     if (elevator) {
       const dx = p.x - elevator.pos.x, dz = p.z - elevator.pos.z;
       if (dx*dx + dz*dz < 2.0*2.0) {
@@ -77,11 +76,11 @@ export function createInteract(ctx) {
         return;
       }
     }
-    const stairExit = getStairExit();
+    const stairExit = S.stairExit;
     if (stairExit) {
       const dx = p.x - stairExit.pos.x, dz = p.z - stairExit.pos.z;
       if (dx*dx + dz*dz < 1.6*1.6) {
-        const cur = getCurrentLevel();
+        const cur = S.currentLevel;
         if (cur === LEVELS.length - 1) {
           controls.unlock();
           getWinScreen().style.display = 'flex';
@@ -94,11 +93,11 @@ export function createInteract(ctx) {
         return;
       }
     }
-    const randomStair = getRandomStair();
+    const randomStair = S.randomStair;
     if (randomStair) {
       const dx = p.x - randomStair.pos.x, dz = p.z - randomStair.pos.z;
       if (dx*dx + dz*dz < 1.6*1.6) {
-        const cur = getCurrentLevel();
+        const cur = S.currentLevel;
         const others = [];
         for (let i = 0; i < LEVELS.length; i++) if (i !== cur) others.push(i);
         if (!others.length) return;

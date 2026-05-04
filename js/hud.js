@@ -12,15 +12,15 @@
 //   LEVELS, MAX_HP, TEAM_SIZE
 //   WEAPONS                — for weapon name in distance line
 //   player, companions     — bar values + team count
-//   getStairExit(), getRandomStair(), getElevator(), getCurrentLevel()
+//   S.stairExit, S.randomStair, S.elevator, S.currentLevel
 //   isElevatorInTransition()
 //   say, getSubTimer
 
 export function createHUD(ctx) {
   const {
+    S,
     LEVELS, MAX_HP, TEAM_SIZE,
     WEAPONS, player, companions,
-    getStairExit, getRandomStair, getElevator, getCurrentLevel,
     isElevatorInTransition,
     say, getSubTimer,
   } = ctx;
@@ -50,22 +50,22 @@ export function createHUD(ctx) {
       `<span class="bar"><span class="fill" style="width:${avgPct}%"></span></span>` +
       `&nbsp;<b style="color:#fff">${aliveCount}</b> / ${TEAM_SIZE} 存活</div>`;
 
-    const stairExit = getStairExit();
+    const stairExit = S.stairExit;
     if (stairExit) {
       const dx = pp.x - stairExit.pos.x, dz = pp.z - stairExit.pos.z;
       if (dx*dx + dz*dz < 1.6*1.6) {
-        const tag = getCurrentLevel() === LEVELS.length - 1 ? '逃出后室' : '下一层';
+        const tag = S.currentLevel === LEVELS.length - 1 ? '逃出后室' : '下一层';
         if (getSubTimer() <= 0) say(`按 E ${tag}`, 0.4);
       }
     }
-    const randomStair = getRandomStair();
+    const randomStair = S.randomStair;
     if (randomStair) {
       const dx = pp.x - randomStair.pos.x, dz = pp.z - randomStair.pos.z;
       if (dx*dx + dz*dz < 1.6*1.6) {
         if (getSubTimer() <= 0) say('按 E 进入随机楼层', 0.4);
       }
     }
-    const elevator = getElevator();
+    const elevator = S.elevator;
     if (elevator) {
       const dx = pp.x - elevator.pos.x, dz = pp.z - elevator.pos.z;
       if (!isElevatorInTransition() && dx*dx + dz*dz < 2.0*2.0) {

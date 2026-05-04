@@ -15,7 +15,7 @@
 // ctx shape:
 //   THREE
 //   controls, player, deathScreen, flashEl
-//   getEntities(), getCompanions(), getWallBoxes()
+//   S.entities, companions, S.wallBoxes
 //                — current-level arrays (re-derived each call so
 //                  disposeLevel's reassignment stays invisible)
 //   leaveCorpse, playDeathCry, playStatic
@@ -25,18 +25,18 @@ import * as THREE from 'three';
 
 export function createEntities(ctx) {
   const {
+    S,
     controls, player, deathScreen, flashEl,
-    getEntities, getCompanions, getWallBoxes,
     leaveCorpse, playDeathCry, playStatic,
     say, speak,
   } = ctx;
 
   return function tickEntities(dt, t) {
-    const entities = getEntities();
+    const entities = S.entities;
     if (!entities.length) return;
     const pp = controls.getObject().position;
-    const wallBoxes = getWallBoxes();
-    const companions = getCompanions();
+    const wallBoxes = S.wallBoxes;
+    const companions = companions;
 
     for (const e of entities) {
       const v = new THREE.Vector3().subVectors(pp, e.mesh.position);

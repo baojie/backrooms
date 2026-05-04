@@ -20,15 +20,15 @@
 //
 // ctx shape:
 //   LEVELS, controls
-//   getElevator()       — current elevator object (rebuilt each level)
-//   getCurrentLevel()   — read-only current floor index
+//   S.elevator       — current elevator object (rebuilt each level)
+//   S.currentLevel   — read-only current floor index
 //   buildLevel(i, opts) — game's level builder
 //   blip, say, speak    — audio + subtitles
 
 export function createElevator(ctx) {
   const {
+    S,
     LEVELS, controls,
-    getElevator, getCurrentLevel,
     buildLevel,
     blip, say, speak,
   } = ctx;
@@ -45,7 +45,7 @@ export function createElevator(ctx) {
 
   function open() {
     floorListEl.innerHTML = LEVELS.map((L, i) =>
-      `<button data-floor="${i}" class="${i===getCurrentLevel()?'cur':''}">${i+1}. ${L.name}</button>`
+      `<button data-floor="${i}" class="${i===S.currentLevel?'cur':''}">${i+1}. ${L.name}</button>`
     ).join('');
     elevatorPanel.style.display = 'flex';
     controls.unlock();
@@ -59,8 +59,8 @@ export function createElevator(ctx) {
     if (i < 0 || i >= LEVELS.length) return;
     if (!elevatorTransition) {
       close();
-      if (i === getCurrentLevel()) return;
-      const elevator = getElevator();
+      if (i === S.currentLevel) return;
+      const elevator = S.elevator;
       if (!elevator) { buildLevel(i, { spawnAtElevator: true }); return; }
       elevatorTransition = { phase: 'closing', t: 0, target: i };
       controls.unlock();
@@ -70,7 +70,7 @@ export function createElevator(ctx) {
       return;
     }
     // Already in 'pulling' phase, picked floor → continue from closing.
-    if (i === getCurrentLevel()) {
+    if (i === S.currentLevel) {
       elevatorTransition = null;
       controls.lock();
       close();
@@ -101,7 +101,7 @@ export function createElevator(ctx) {
 
   // Animates doors + advances the transition phase each frame.
   function tickElevator(dt, t) {
-    const elevator = getElevator();
+    const elevator = S.elevator;
     if (elevator) {
       if (elevator.btn) elevator.btn.material.color.setHSL(0.55, 0.8, 0.45 + Math.sin(t*4)*0.2);
       const o = elevator.doorOpen;
@@ -112,7 +112,7 @@ export function createElevator(ctx) {
     const T = elevatorTransition;
     T.t += dt;
     if (T.phase === 'pulling') {
-      const e = getElevator();
+      const e = S.elevator;
       if (!e) { elevatorTransition = null; return; }
       const targetX = e.pos.x;
       const targetZ = e.pos.z;
@@ -124,7 +124,7 @@ export function createElevator(ctx) {
       if (T.t > 0.6) { T.phase = 'closing'; T.t = 0; blip(440, 0.3, 0.18); }
     } else if (T.phase === 'closing') {
       const a = Math.min(T.t / 0.7, 1);
-      const e = getElevator();
+      const e = S.elevator;
       if (e) e.doorOpen = 1 - a;
       if (T.t > 0.8) { T.phase = 'fadeout'; T.t = 0; }
     } else if (T.phase === 'fadeout') {
@@ -151,7 +151,7 @@ export function createElevator(ctx) {
       }
     } else if (T.phase === 'opening') {
       const a = Math.min(T.t / 0.9, 1);
-      const e = getElevator();
+      const e = S.elevator;
       if (e) e.doorOpen = a;
       if (T.t > 1.0) {
         flashEl.style.opacity = '0';

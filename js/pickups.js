@@ -13,19 +13,18 @@
 
 export function createPickups(ctx) {
   const {
+    S,
     controls, player, MAX_HP, heldKnifePivot,
-    getLevelGroup,
-    getAlmonds, getKnives, getMedkits,
     say, blip,
   } = ctx;
 
   return function updatePickups(dt, t) {
     const pp = controls.getObject().position;
-    const levelGroup = getLevelGroup();
+    const levelGroup = S.levelGroup;
 
     // Almond water — sanity restore + speed boost.
     if (player.speedBoost > 0) player.speedBoost = Math.max(0, player.speedBoost - dt);
-    for (const a of getAlmonds()) {
+    for (const a of S.almonds) {
       if (!a.alive) continue;
       a.mesh.rotation.y += dt * 1.5;
       a.mesh.position.y = a.baseY + Math.sin(t * 2 + a.seed) * 0.06;
@@ -42,7 +41,7 @@ export function createPickups(ctx) {
       }
     }
     // Knife — give the player melee.
-    for (const k of getKnives()) {
+    for (const k of S.knives) {
       if (!k.alive) continue;
       k.mesh.rotation.y += dt * 2;
       k.mesh.position.y = k.baseY + Math.sin(t * 2.5 + k.seed) * 0.08;
@@ -58,7 +57,7 @@ export function createPickups(ctx) {
       }
     }
     // Medkits — restore 3000 HP each.
-    for (const m of getMedkits()) {
+    for (const m of S.medkits) {
       if (!m.alive) continue;
       m.mesh.rotation.y += dt * 1.2;
       m.mesh.position.y = m.baseY + Math.sin(t * 2.2 + m.seed) * 0.06;

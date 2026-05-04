@@ -83,6 +83,7 @@ import { createAtmosphere } from './js/atmosphere.js';
 import { createHUD } from './js/hud.js';
 import { createLevelBuilder } from './js/level.js';
 import { setupOverlayDOM } from './js/dom_setup.js';
+import { createGameState } from './js/state.js';
 
 // Build the four full-screen overlays (welcome / death / win / elevator)
 // before any module looks them up via getElementById.
@@ -102,30 +103,10 @@ addEventListener('keydown',     initAudio, { once: true, capture: true });
 const { scene, renderer, camera, controls, flashlight } = createScene();
 
 
-// ============================================================
-// Level state
-// ============================================================
-
-let levelGroup = null;
-let wallBoxes = [];
-let wallMeshRef = null;       // current level's instanced wall mesh
-let rockets = [];             // active rocket projectiles
-let lights = [];
-let almonds = [];
-let knives = [];
-let medkits = [];          // first-aid pickups — restore HP on contact
-let entities = [];
-let electricZones = [];   // live-wire hazards on flooded levels — instant kill on contact
-let toxicZones = [];      // sickly-green water patches — slow damage on contact
-let boats = [];           // boardable boats on flooded levels
-let moths = [];           // fluttering moths — drain hp on contact, killable with insecticide
-let stairExit = null;
-let randomStair = null;    // bonus staircase that warps to a random other floor
-let elevator = null;
-let pool = null;           // sunken pool footprint on the swimming-pool level
-let guide = null;          // kind-stranger NPC that leads the player to the exit
-let currentLevel = 0;
-let cells = [];
+// All per-level state — see js/state.js. Modules read S.foo / write S.foo
+// directly; level.js reassigns singletons on each transition; disposeLevel
+// clears arrays in place. No more `let` bindings + setter callbacks.
+const S = createGameState();
 
 // ============================================================
 // Player + companions
@@ -156,26 +137,11 @@ loadCharacters({
 
 
 // Level builder + disposer + spawnProps wrapper + showFloorTitle —
-// see js/level.js. We keep the `let` bindings for the singletons here so
-// other modules' getters (() => stairExit, etc.) keep resolving the
-// current value; level.js calls the set* callbacks each time it (re)
-// assigns one.
+// see js/level.js. Mutates S.levelGroup / S.stairExit / ... directly.
 const _level = createLevelBuilder({
-  scene, camera, controls, player,
+  S,
+  scene, camera, controls, player, companions,
   LEVELS, GRID, CELL, WALL_HEIGHT,
-  wallBoxes, lights, almonds, knives, medkits, entities, rockets,
-  electricZones, toxicZones, boats, moths, companions,
-  setLevelGroup:    (v) => { levelGroup    = v; },
-  setWallMeshRef:   (v) => { wallMeshRef   = v; },
-  setStairExit:     (v) => { stairExit     = v; },
-  setRandomStair:   (v) => { randomStair   = v; },
-  setElevator:      (v) => { elevator      = v; },
-  setPool:          (v) => { pool          = v; },
-  setGuide:         (v) => { guide         = v; },
-  setCurrentLevel:  (v) => { currentLevel  = v; },
-  setCells:         (v) => { cells         = v; },
-  getLevelGroup:    () => levelGroup,
-  getCells:         () => cells,
   makeNoiseTexture, makeWallpaperTexture, makeCarpetTexture, makeCeilingTileTexture,
   buildKnifeMesh,
   buildCompanionMesh, attachCompanionKnife, makeNameTag, buildProceduralCompanion,
@@ -192,9 +158,7 @@ const { buildLevel, disposeLevel } = _level;
 const keys = {};
 // Elevator UI + transition (see js/elevator.js).
 const _elev = createElevator({
-  LEVELS, controls,
-  getElevator: () => elevator,
-  getCurrentLevel: () => currentLevel,
+  S, LEVELS, controls,
   buildLevel,
   blip, say, speak,
 });
@@ -207,12 +171,7 @@ const isElevatorInTransition = _elev.isInTransition;
 
 // Interact (E key) + leaveCorpse helper (see js/interact.js).
 const tryInteract = createInteract({
-  LEVELS, controls, player,
-  getBoats:       () => boats,
-  getElevator:    () => elevator,
-  getStairExit:   () => stairExit,
-  getRandomStair: () => randomStair,
-  getCurrentLevel: () => currentLevel,
+  S, LEVELS, controls, player,
   buildLevel,
   tryEnterElevator, isElevatorInTransition,
   say, speak, blip,
@@ -227,7 +186,7 @@ const { startGame, resetAll, overlay, deathScreen, winScreen } = setupOverlay({
 
 
 // Collision (see js/collision.js).
-const collide = makeCollider({ getWallBoxes: () => wallBoxes, GRID, CELL });
+const collide = makeCollider({ S, GRID, CELL });
 
 // ============================================================
 // Game loop
@@ -235,34 +194,23 @@ const collide = makeCollider({ getWallBoxes: () => wallBoxes, GRID, CELL });
 const clock = new THREE.Clock();
 const flashEl = document.getElementById('flash');
 
-// Bind the weapon-firing helpers to the live game state. The closure
-// captures references to the mutable arrays (entities, companions, etc.)
-// so in-place mutations are visible to both sides; `levelGroup` and
-// `wallMeshRef` are dereffed via getters because they're rebuilt on each
-// level transition.
+// Weapon firing + projectile updater — see js/weapon_fx.js.
 const _wfx = createWeaponFX({
-  WEAPONS, GRID, CELL, WALL_HEIGHT,
-  player, camera, controls, flashEl,
-  entities, companions, wallBoxes, rockets, moths,
-  getLevelGroup: () => levelGroup,
-  getWallMeshRef: () => wallMeshRef,
+  S, WEAPONS, GRID, CELL, WALL_HEIGHT,
+  player, camera, controls, flashEl, companions,
   blip, playStatic, say, initAudio,
   playDeathCry, leaveCorpse,
 });
 const { useWeapon, fireGun, fireRocket, sprayInsecticide,
         trySwingKnife, explode, destroyWallsAt, tickRockets } = _wfx;
 
-// Companion AI + GLTF upgrade scheduler. Same closure pattern: arrays
-// captured by reference, levelGroup re-derived on each call.
+// Companion AI + per-frame update + GLTF upgrade scheduler — see js/companion_ai.js.
 const _ai = createCompanionAI({
-  THREE, controls,
-  entities, companions,
-  getLevelGroup: () => levelGroup,
-  getPool: () => pool,
+  S, THREE, controls, companions,
   isSoldierLoaded, isGirlLoaded,
   buildSoldierEntity, buildGLTFGirl, attachCompanionKnife,
   collide, blip, say, speak,
-  pickCompanionLine, getCurrentLevel: () => currentLevel, MAX_HP, player,
+  pickCompanionLine, MAX_HP, player,
 });
 const { updateCompanions, tickCompanionChatter, upgradeEntitiesToGLTF,
         scheduleGLTFUpgrade, isGLTFUpgradeComplete } = _ai;
@@ -279,32 +227,23 @@ setupInput({
 
 // Pool-floor hazards (electric / moths / toxic) — see js/hazards.js.
 const { updateElectric, updateMoths, updateToxic } = createHazards({
-  GRID, CELL,
-  controls, player, deathScreen, flashEl,
-  getCompanions: () => companions,
-  getElectricZones: () => electricZones,
-  getToxicZones:    () => toxicZones,
-  getMoths:         () => moths,
+  S, GRID, CELL,
+  controls, player, deathScreen, flashEl, companions,
   leaveCorpse, playDeathCry, playStatic,
   say, speak,
 });
 
 // Hostile entity AI (per-frame chase + animation) — see js/entities.js.
 const tickEntities = createEntities({
-  controls, player, deathScreen, flashEl,
-  getEntities:  () => entities,
-  getCompanions: () => companions,
-  getWallBoxes:  () => wallBoxes,
+  S, controls, player, deathScreen, flashEl, companions,
   leaveCorpse, playDeathCry, playStatic,
   say, speak,
 });
 
 // Player update (wake-up / movement / flashlight / death) — see js/player.js.
 const { updatePlayerWakeup, updatePlayerMovement, updatePlayerDeath } = createPlayer({
-  controls, camera, flashlight, flashEl, deathScreen,
+  S, controls, camera, flashlight, flashEl, deathScreen,
   player, keys,
-  getPool:       () => pool,
-  getLevelGroup: () => levelGroup,
   collide,
   playStatic,
   buildProceduralCompanion, leaveCorpse,
@@ -312,11 +251,7 @@ const { updatePlayerWakeup, updatePlayerMovement, updatePlayerDeath } = createPl
 
 // Pickups + held-weapon animation — see js/pickups.js, js/weapon_anim.js.
 const updatePickups = createPickups({
-  controls, player, MAX_HP, heldKnifePivot,
-  getLevelGroup: () => levelGroup,
-  getAlmonds:    () => almonds,
-  getKnives:     () => knives,
-  getMedkits:    () => medkits,
+  S, controls, player, MAX_HP, heldKnifePivot,
   say, blip,
 });
 const updateWeaponAnim = createWeaponAnim({
@@ -326,12 +261,8 @@ const updateWeaponAnim = createWeaponAnim({
 
 // Atmosphere — see js/atmosphere.js.
 const updateAtmosphere = createAtmosphere({
-  THREE,
+  S, THREE,
   controls, player, MAX_HP,
-  getEntities:    () => entities,
-  getLights:      () => lights,
-  getStairExit:   () => stairExit,
-  getRandomStair: () => randomStair,
   whispers,
   getAudioCtx, getHumGain, getLastHeart, setLastHeart, heartbeat,
   say, speak,
@@ -339,24 +270,14 @@ const updateAtmosphere = createAtmosphere({
 
 // HUD bars + interact prompts — see js/hud.js.
 const updateHUD = createHUD({
-  LEVELS, MAX_HP, TEAM_SIZE,
+  S, LEVELS, MAX_HP, TEAM_SIZE,
   WEAPONS, player, companions,
-  getStairExit:   () => stairExit,
-  getRandomStair: () => randomStair,
-  getElevator:    () => elevator,
-  getCurrentLevel: () => currentLevel,
   isElevatorInTransition,
   say, getSubTimer,
 });
 
-// Guide ctx — stable references; per-frame the closure derefs the live
-// `guide`, `stairExit`, `cells` bindings via property access.
-const _guideCtx = {
-  get guide()      { return guide; },
-  get stairExit()  { return stairExit; },
-  get cells()      { return cells; },
-  controls, GRID, CELL, collide,
-};
+// Guide ctx — S provides the live singletons; the rest are stable refs.
+const _guideCtx = { S, controls, GRID, CELL, collide };
 
 function tick() {
   const dt = Math.min(clock.getDelta(), 0.05);
@@ -394,7 +315,7 @@ function tick() {
   updateHUD(dt, t, pp);
   tickElevator(dt, t);
 
-  scene.fog.far = LEVELS[currentLevel].fogFar - (1 - player.sanity) * 10;
+  scene.fog.far = LEVELS[S.currentLevel].fogFar - (1 - player.sanity) * 10;
 
   tickSubtitle(dt);
 

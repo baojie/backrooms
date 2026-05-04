@@ -10,9 +10,9 @@
 //   WEAPONS        — weapon definition table (keyed by player.weapon)
 //   GRID, CELL, WALL_HEIGHT  — level bounds for projectile despawn
 //   player, camera, controls, flashEl  — game references
-//   entities, companions, wallBoxes, rockets, moths  — mutable arrays
+//   companions  — mutable arrays
 //                    (mutated in place; never reassigned)
-//   getLevelGroup(), getWallMeshRef()  — getters because these refs are
+//   S.levelGroup, S.wallMeshRef  — getters because these refs are
 //                    rebuilt on every level transition; getter dereference
 //                    keeps the closure valid across rebuilds
 //   blip, playStatic, say, initAudio   — audio + subtitle helpers
@@ -22,10 +22,9 @@ import * as THREE from 'three';
 
 export function createWeaponFX(ctx) {
   const {
+    S,
     WEAPONS, GRID, CELL, WALL_HEIGHT,
-    player, camera, controls, flashEl,
-    entities, companions, wallBoxes, rockets, moths,
-    getLevelGroup, getWallMeshRef,
+    player, camera, controls, flashEl, companions,
     blip, playStatic, say, initAudio,
     playDeathCry, leaveCorpse,
   } = ctx;
@@ -54,11 +53,11 @@ export function createWeaponFX(ctx) {
       blip(2200 + Math.random()*400, 0.06, 0.04);
       sprayInsecticide._hissT = performance.now();
     }
-    if (!moths.length) return;
+    if (!S.moths.length) return;
     const camPos = controls.getObject().position;
     const fwd = new THREE.Vector3();
     camera.getWorldDirection(fwd);
-    for (const m of moths) {
+    for (const m of S.moths) {
       if (!m.alive) continue;
       const dx = m.mesh.position.x - camPos.x;
       const dy = m.mesh.position.y - camPos.y;
@@ -89,7 +88,7 @@ export function createWeaponFX(ctx) {
 
     const targets = [];
     for (const c of companions) if (c.alive && c.mesh) targets.push({ mesh: c.mesh, kind: 'companion', ref: c });
-    for (const e of entities) if (e.mesh) targets.push({ mesh: e.mesh, kind: 'entity', ref: e });
+    for (const e of S.entities) if (e.mesh) targets.push({ mesh: e.mesh, kind: 'entity', ref: e });
     if (!targets.length) return;
 
     _gunRay.setFromCamera(_gunOrigin, camera);
@@ -112,8 +111,8 @@ export function createWeaponFX(ctx) {
       say('击中怪物！', 1.5);
       playStatic();
       // In-place compaction (don't reassign — closure captures the array reference).
-      for (let i = entities.length - 1; i >= 0; i--) {
-        if (!entities[i].mesh) entities.splice(i, 1);
+      for (let i = S.entities.length - 1; i >= 0; i--) {
+        if (!S.entities[i].mesh) S.entities.splice(i, 1);
       }
     } else {
       target.ref.alive = false;
@@ -128,7 +127,7 @@ export function createWeaponFX(ctx) {
   function fireRocket() {
     const w = WEAPONS.rocket;
     if (player.gunRecoil > 0) return;
-    const levelGroup = getLevelGroup();
+    const levelGroup = S.levelGroup;
     if (!levelGroup) return;
     player.gunRecoil = w.cooldown;
     blip(80, 0.35, 0.45); blip(180, 0.20, 0.30);
@@ -169,14 +168,14 @@ export function createWeaponFX(ctx) {
     rocket.lookAt(lookAt);
     levelGroup.add(rocket);
 
-    rockets.push({
+    S.rockets.push({
       mesh: rocket, pos: start.clone(), dir: dir.clone().normalize(),
       age: 0, light: flame,
     });
   }
 
   function explode(pos) {
-    const levelGroup = getLevelGroup();
+    const levelGroup = S.levelGroup;
     if (!levelGroup) return;
     const radius = WEAPONS.rocket.blastRadius;
     const flashMesh = new THREE.Mesh(
@@ -209,15 +208,15 @@ export function createWeaponFX(ctx) {
     blip(220, 0.25, 0.25);
     playStatic();
 
-    for (let i = entities.length - 1; i >= 0; i--) {
-      const e = entities[i];
+    for (let i = S.entities.length - 1; i >= 0; i--) {
+      const e = S.entities[i];
       if (!e.mesh) continue;
       const d = e.mesh.position.distanceTo(pos);
       if (d < radius) {
         e.hp = (e.hp ?? 1) - WEAPONS.rocket.blastDamage;
         if (e.hp <= 0) {
           leaveCorpse(e.mesh);
-          entities.splice(i, 1);
+          S.entities.splice(i, 1);
         }
       }
     }
@@ -240,17 +239,17 @@ export function createWeaponFX(ctx) {
   }
 
   function destroyWallsAt(pos, radius) {
-    const wallMeshRef = getWallMeshRef();
+    const wallMeshRef = S.wallMeshRef;
     if (!wallMeshRef) return;
     const r2 = radius * radius;
     const zeroMat = new THREE.Matrix4().makeScale(0.0001, 0.0001, 0.0001);
     let removed = 0;
-    for (let i = wallBoxes.length - 1; i >= 0; i--) {
-      const wb = wallBoxes[i];
+    for (let i = S.wallBoxes.length - 1; i >= 0; i--) {
+      const wb = S.wallBoxes[i];
       const dx = wb.x - pos.x, dz = wb.z - pos.z;
       if (dx * dx + dz * dz < r2) {
         wallMeshRef.setMatrixAt(wb.instanceIdx, zeroMat);
-        wallBoxes.splice(i, 1);
+        S.wallBoxes.splice(i, 1);
         removed++;
       }
     }
@@ -265,7 +264,7 @@ export function createWeaponFX(ctx) {
     const camDir = new THREE.Vector3();
     camera.getWorldDirection(camDir); camDir.y = 0; camDir.normalize();
     const pp = controls.getObject().position;
-    for (const e of entities) {
+    for (const e of S.entities) {
       if (!e.mesh) continue;
       const v = new THREE.Vector3().subVectors(e.mesh.position, pp);
       const d = v.length();
@@ -284,8 +283,8 @@ export function createWeaponFX(ctx) {
       }
     }
     // In-place compaction (don't reassign — closure captures the array reference).
-    for (let i = entities.length - 1; i >= 0; i--) {
-      if (!entities[i].mesh) entities.splice(i, 1);
+    for (let i = S.entities.length - 1; i >= 0; i--) {
+      if (!S.entities[i].mesh) S.entities.splice(i, 1);
     }
   }
 
@@ -294,21 +293,21 @@ export function createWeaponFX(ctx) {
   // ceiling / out-of-bounds / 4s timeout collision, and detonates via
   // `explode()` on the first hit.
   function tickRockets(dt) {
-    if (!rockets.length) return;
-    const levelGroup = getLevelGroup();
-    for (let i = rockets.length - 1; i >= 0; i--) {
-      const r = rockets[i];
+    if (!S.rockets.length) return;
+    const levelGroup = S.levelGroup;
+    for (let i = S.rockets.length - 1; i >= 0; i--) {
+      const r = S.rockets[i];
       r.age += dt;
       r.pos.addScaledVector(r.dir, 32 * dt);
       r.mesh.position.copy(r.pos);
 
       let hit = false;
-      for (const wb of wallBoxes) {
+      for (const wb of S.wallBoxes) {
         const dx = r.pos.x - wb.x, dz = r.pos.z - wb.z;
         if (Math.abs(dx) < wb.half + 0.15 && Math.abs(dz) < wb.half + 0.15) { hit = true; break; }
       }
       if (!hit) {
-        for (const e of entities) {
+        for (const e of S.entities) {
           if (e.mesh && e.mesh.position.distanceTo(r.pos) < 1.0) { hit = true; break; }
         }
       }
@@ -324,7 +323,7 @@ export function createWeaponFX(ctx) {
           if (o.geometry) o.geometry.dispose();
           if (o.material) o.material.dispose();
         });
-        rockets.splice(i, 1);
+        S.rockets.splice(i, 1);
       }
     }
   }

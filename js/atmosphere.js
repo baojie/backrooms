@@ -13,16 +13,16 @@
 // ctx shape:
 //   THREE
 //   controls, player, MAX_HP
-//   getEntities(), getLights(), getStairExit(), getRandomStair()
+//   S.entities, S.lights, S.stairExit, S.randomStair
 //   whispers
 //   getAudioCtx, getHumGain, getLastHeart, setLastHeart, heartbeat
 //   say, speak
 
 export function createAtmosphere(ctx) {
   const {
+    S,
     THREE,
     controls, player, MAX_HP,
-    getEntities, getLights, getStairExit, getRandomStair,
     whispers,
     getAudioCtx, getHumGain, getLastHeart, setLastHeart, heartbeat,
     say, speak,
@@ -30,8 +30,8 @@ export function createAtmosphere(ctx) {
 
   return function updateAtmosphere(dt, t) {
     const pp = controls.getObject().position;
-    const lights = getLights();
-    const entities = getEntities();
+    const lights = S.lights;
+    const entities = S.entities;
 
     // Light flicker (level-spawned fluorescents): random brightness wobble
     // + occasional dropouts, panel surface tint follows the bulb.
@@ -72,12 +72,12 @@ export function createAtmosphere(ctx) {
       speak('旁白', w, { rate: 0.85, pitch: 0.6 });
     }
 
-    const stairExit = getStairExit();
+    const stairExit = S.stairExit;
     if (stairExit && stairExit.pillar) {
       const sc = 1 + Math.sin(t * 3) * 0.1;
       stairExit.pillar.scale.set(1, sc, 1);
     }
-    const randomStair = getRandomStair();
+    const randomStair = S.randomStair;
     if (randomStair && randomStair.pillar) {
       // Slightly faster pulse + hue shift so it stands out from the regular stair.
       const sc = 1 + Math.sin(t * 4.5) * 0.12;

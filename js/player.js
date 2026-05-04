@@ -18,8 +18,8 @@
 //   THREE
 //   controls, camera, flashlight, flashEl, deathScreen
 //   player, keys
-//   getPool()                — pool footprint (rebuilt per level)
-//   getLevelGroup()          — for corpse placement
+//   S.pool                — pool footprint (rebuilt per level)
+//   S.levelGroup          — for corpse placement
 //   collide                  — wall collision (from js/collision.js)
 //   playStatic               — death-trigger sting
 //   buildProceduralCompanion — to construct the corpse mesh
@@ -29,9 +29,9 @@ import * as THREE from 'three';
 
 export function createPlayer(ctx) {
   const {
+    S,
     controls, camera, flashlight, flashEl, deathScreen,
     player, keys,
-    getPool, getLevelGroup,
     collide,
     playStatic,
     buildProceduralCompanion, leaveCorpse,
@@ -73,7 +73,7 @@ export function createPlayer(ctx) {
     // "In water" now means "inside the sunken pool footprint" (the
     // redesigned pool level no longer floods the whole hall).
     const _pp = controls.getObject().position;
-    const pool = getPool();
+    const pool = S.pool;
     const inWater = !!(pool
       && Math.abs(_pp.x - pool.x) < pool.halfX
       && Math.abs(_pp.z - pool.z) < pool.halfZ);
@@ -142,7 +142,7 @@ export function createPlayer(ctx) {
       flashEl.style.background = '#600000';
       flashEl.style.opacity = String(0.55 * player.dying);
       if (player.dying >= 1 && deathScreen.style.display !== 'flex') {
-        const levelGroup = getLevelGroup();
+        const levelGroup = S.levelGroup;
         if (player.deathPos && levelGroup) {
           const corpse = buildProceduralCompanion(0x9a3a3a, 0x2a2a3a);
           corpse.position.copy(player.deathPos);

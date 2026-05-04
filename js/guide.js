@@ -78,7 +78,8 @@ export function findPathBFS(sx, sz, gx, gz, cells, GRID) {
 // re-planning if stuck against a wall for >0.8s. Drops chatter on a
 // 6–11s cooldown while leading.
 export function updateGuide(dt, t, ctx) {
-  const { guide, controls, stairExit, cells, GRID, CELL, collide } = ctx;
+  const { S, controls, GRID, CELL, collide } = ctx;
+  const { guide, stairExit, cells } = S;
   if (!guide || !guide.alive || !guide.mesh) return;
   const pp = controls.getObject().position;
   const dToPlayer = Math.hypot(guide.mesh.position.x - pp.x, guide.mesh.position.z - pp.z);

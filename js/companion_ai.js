@@ -17,8 +17,8 @@
 //       the headless screenshot mode to know when to snap a frame).
 //
 // ctx shape:
-//   entities, companions       — mutable arrays (mutated in place)
-//   getLevelGroup()            — current level group ref (re-derived each
+//   companions       — mutable arrays (mutated in place)
+//   S.levelGroup            — current level group ref (re-derived each
 //                                call because levelGroup is rebuilt on
 //                                every level transition)
 //   isSoldierLoaded()          — Soldier.glb proto availability
@@ -31,14 +31,13 @@
 
 export function createCompanionAI(ctx) {
   const {
-    THREE,
-    entities, companions,
-    getLevelGroup, getPool,
+    S,
+    THREE, companions,
     controls,
     isSoldierLoaded, isGirlLoaded,
     buildSoldierEntity, buildGLTFGirl, attachCompanionKnife,
     collide, blip, say, speak,
-    pickCompanionLine, getCurrentLevel, MAX_HP, player,
+    pickCompanionLine, MAX_HP, player,
   } = ctx;
 
   // Companion knife AI — runs for both GLTF girls (rig=null) and
@@ -48,7 +47,7 @@ export function createCompanionAI(ctx) {
   function runCompanionKnifeCombat(c, dt, _t, rig) {
     if (!c.hasKnife) return;
     let nearest = null, nd = Infinity;
-    for (const e of entities) {
+    for (const e of S.entities) {
       const ddx = e.mesh.position.x - c.mesh.position.x;
       const ddz = e.mesh.position.z - c.mesh.position.z;
       const d2 = ddx*ddx + ddz*ddz;
@@ -71,9 +70,9 @@ export function createCompanionAI(ctx) {
         nearest.hp = (nearest.hp ?? 1) - 0.35;
         blip(220, 0.08, 0.10);
         if (nearest.hp <= 0) {
-          const idx = entities.indexOf(nearest);
-          if (idx >= 0) entities.splice(idx, 1);
-          const lg = getLevelGroup();
+          const idx = S.entities.indexOf(nearest);
+          if (idx >= 0) S.entities.splice(idx, 1);
+          const lg = S.levelGroup;
           if (lg) lg.remove(nearest.mesh);
           const line = `${c.name} 解决了一个！`;
           say(line, 3);
@@ -94,9 +93,9 @@ export function createCompanionAI(ctx) {
 
   // Eager swap (called once when Soldier.glb finishes loading).
   function upgradeEntitiesToGLTF() {
-    const levelGroup = getLevelGroup();
+    const levelGroup = S.levelGroup;
     if (!isSoldierLoaded() || !levelGroup) return;
-    for (const e of entities) {
+    for (const e of S.entities) {
       if (!e.mesh || e.mesh.userData.gltf) continue;
       const newMesh = buildSoldierEntity();
       if (!newMesh) return;
@@ -116,7 +115,7 @@ export function createCompanionAI(ctx) {
     _gltfUpgradeIdx = 0;
     if (!isGirlLoaded()) return;
     function step() {
-      const lg = getLevelGroup();
+      const lg = S.levelGroup;
       if (!isGirlLoaded() || !lg) return;
       const budget = 3;   // upgrade up to 3 figures per frame
       let done = 0;
@@ -157,7 +156,7 @@ export function createCompanionAI(ctx) {
   // player's eyes / mouth for "talking" animation.
   function updateCompanions(dt, t) {
     const pp = controls.getObject().position;
-    const pool = getPool ? getPool() : null;
+    const pool = getPool ? S.pool : null;
     for (const c of companions) {
       if (!c.alive || !c.mesh) continue;
       // Slow rotation of formation so it feels alive
@@ -269,7 +268,7 @@ export function createCompanionAI(ctx) {
       const c = alive[Math.floor(Math.random()*alive.length)];
       let nearestEntityDist = Infinity;
       const pp = controls.getObject().position;
-      for (const ee of entities) {
+      for (const ee of S.entities) {
         const d = ee.mesh.position.distanceTo(pp);
         if (d < nearestEntityDist) nearestEntityDist = d;
       }
@@ -278,7 +277,7 @@ export function createCompanionAI(ctx) {
         sanity: player.sanity,
         hp: player.hp / MAX_HP,
         speedBoost: player.speedBoost,
-        currentLevel: getCurrentLevel(),
+        currentLevel: S.currentLevel,
       });
       const line = `${c.name}：「${raw}」`;
       say(line, 4);

@@ -1,11 +1,11 @@
-// Level construction: walls, floor, ceiling, lights, props, NPCs.
+// Level construction: walls, floor, ceiling, S.lights, props, NPCs.
 //
 // `createLevelBuilder(ctx)` returns `{ buildLevel, disposeLevel }`. The
 // per-level singletons (levelGroup, wallMeshRef, stairExit, randomStair,
 // elevator, pool, guide, cells, currentLevel) are owned by index.html;
 // level.js calls `set*(value)` after each assignment so the index.html
-// bindings stay in sync. Per-level arrays (wallBoxes, lights, almonds,
-// knives, medkits, entities, electricZones, toxicZones, boats, moths)
+// bindings stay in sync. Per-level arrays (S.wallBoxes, S.lights, S.almonds,
+// S.knives, S.medkits, S.entities, S.electricZones, S.toxicZones, S.boats, S.moths)
 // are mutated in place — never reassigned — so module factories that
 // captured those references at construction time keep working.
 //
@@ -18,8 +18,8 @@
 //   6. instanced wall mesh
 //   7. floor strips (deck around the pool) or full floor plane
 //   8. ceiling tiles or sky dome
-//   9. ambient + per-cell point lights with pulsing fluorescent panels
-//  10. spawn pool: companions, almonds, knives, medkits
+//   9. ambient + per-cell point S.lights with pulsing fluorescent panels
+//  10. spawn pool: companions, S.almonds, S.knives, S.medkits
 //  11. stair exit (red pulsing pillar; final floor uses green)
 //  12. random stair (purple pulsing pillar; warps to a random other floor)
 //  13. elevator cabin (corner-placed, animated doors)
@@ -33,16 +33,9 @@ import * as THREE from 'three';
 
 export function createLevelBuilder(ctx) {
   const {
-    scene, camera, controls, player,
+    S,
+    scene, camera, controls, player, companions,
     LEVELS, GRID, CELL, WALL_HEIGHT,
-    // arrays (in-place mutated)
-    wallBoxes, lights, almonds, knives, medkits, entities, rockets,
-    electricZones, toxicZones, boats, moths, companions,
-    // setters for level singletons
-    setLevelGroup, setWallMeshRef, setStairExit, setRandomStair,
-    setElevator, setPool, setGuide, setCurrentLevel, setCells,
-    // getters for cross-function reads
-    getLevelGroup, getCells,
     // texture helpers
     makeNoiseTexture, makeWallpaperTexture, makeCarpetTexture, makeCeilingTileTexture,
     // mesh builders
@@ -61,11 +54,11 @@ export function createLevelBuilder(ctx) {
 
 function buildLayout(cfg) {
   cells = cfg.buildLayout(GRID);
-  setCells(cells);
+  S.cells = cells;
 }
 
 function disposeLevel() {
-  const levelGroup = getLevelGroup();
+  const levelGroup = S.levelGroup;
   if (!levelGroup) return;
   scene.remove(levelGroup);
   levelGroup.traverse(o => {
@@ -76,36 +69,36 @@ function disposeLevel() {
     }
   });
   levelGroup = null;
-  setLevelGroup(levelGroup);
+  S.levelGroup = levelGroup;
   // Clear arrays IN PLACE so module factories (weapon_fx, companion_ai,
-  // hazards, entities) that captured these references at construction
+  // hazards, S.entities) that captured these references at construction
   // time continue to see the same array — never reassign with `[]`.
-  wallBoxes.length = 0;
-  lights.length = 0;
-  almonds.length = 0;
-  knives.length = 0;
-  medkits.length = 0;
-  entities.length = 0;
-  electricZones.length = 0;
-  toxicZones.length = 0;
-  boats.length = 0;
-  moths.length = 0;
-  rockets.length = 0;
+  S.wallBoxes.length = 0;
+  S.lights.length = 0;
+  S.almonds.length = 0;
+  S.knives.length = 0;
+  S.medkits.length = 0;
+  S.entities.length = 0;
+  S.electricZones.length = 0;
+  S.toxicZones.length = 0;
+  S.boats.length = 0;
+  S.moths.length = 0;
+  S.rockets.length = 0;
   // Per-level singletons reset to null — getters used by modules
   // re-resolve each call so this propagates correctly.
   stairExit = null;
-  setStairExit(stairExit);
+  S.stairExit = stairExit;
   randomStair = null;
-  setRandomStair(randomStair);
+  S.randomStair = randomStair;
   elevator = null;
-  setElevator(elevator);
+  S.elevator = elevator;
   pool = null;
-  setPool(pool);
+  S.pool = pool;
   guide = null;
-  setGuide(guide);
+  S.guide = guide;
   player.boat = null;
   wallMeshRef = null;
-  setWallMeshRef(wallMeshRef);
+  S.wallMeshRef = wallMeshRef;
 }
 
 function buildLevel(n, opts = {}) {
@@ -113,12 +106,12 @@ function buildLevel(n, opts = {}) {
   disposeLevel();
   const cfg = LEVELS[n];
   currentLevel = n;
-  setCurrentLevel(currentLevel);
+  S.currentLevel = currentLevel;
   scene.background = new THREE.Color(cfg.fogHex);
   scene.fog = new THREE.Fog(cfg.fogHex, cfg.fogNear, cfg.fogFar);
 
   levelGroup = new THREE.Group();
-  setLevelGroup(levelGroup);
+  S.levelGroup = levelGroup;
   scene.add(levelGroup);
 
   buildLayout(cfg);
@@ -127,7 +120,7 @@ function buildLevel(n, opts = {}) {
   // companion code can avoid placing things inside it.
   if (cfg.props === 'water') {
     pool = { x: 0, z: 0, halfX: 22, halfZ: 12, surfaceY: -0.20, bottomY: -1.6 };
-    setPool(pool);
+    S.pool = pool;
   }
 
   // Floor 1 ('lobby' style) gets a Backrooms-canonical texture pack:
@@ -163,15 +156,14 @@ function buildLevel(n, opts = {}) {
         dummy.updateMatrix();
         wallMesh.setMatrixAt(idx, dummy.matrix);
         // Track instance index so the rocket can hide individual blocks.
-        wallBoxes.push({ x: wx, z: wz, half: CELL/2, instanceIdx: idx });
+        S.wallBoxes.push({ x: wx, z: wz, half: CELL/2, instanceIdx: idx });
         idx++;
       }
     }
   }
   levelGroup.add(wallMesh);
   wallMeshRef = wallMesh;          // global handle for destroyWallsAt()
-  setWallMeshRef(wallMeshRef);
-
+  S.wallMeshRef = wallMeshRef;
   const planeGeom = new THREE.PlaneGeometry(GRID*CELL, GRID*CELL);
   if (pool) {
     // Build the deck as four strips around the pool footprint so the pool
@@ -229,7 +221,7 @@ function buildLevel(n, opts = {}) {
       panel.position.copy(light.position);
       panel.position.y = WALL_HEIGHT - 0.05;
       levelGroup.add(panel);
-      lights.push({ light, panel, base: 1.2, seed: Math.random()*100, broken: Math.random() < 0.08 });
+      S.lights.push({ light, panel, base: 1.2, seed: Math.random()*100, broken: Math.random() < 0.08 });
     }
   }
 
@@ -300,7 +292,7 @@ function buildLevel(n, opts = {}) {
     const glow = new THREE.PointLight(0xfff0a0, 0.4, 2.0, 2);
     glow.position.set(wx, 0.5, wz);
     levelGroup.add(glow);
-    almonds.push({ mesh: g, glow, alive:true, baseY:0.18, seed: Math.random()*Math.PI*2 });
+    S.almonds.push({ mesh: g, glow, alive:true, baseY:0.18, seed: Math.random()*Math.PI*2 });
   }
 
   // Knife pickups (rare)
@@ -318,11 +310,11 @@ function buildLevel(n, opts = {}) {
       const glow = new THREE.PointLight(0xc0e8ff, 0.5, 2.2, 2);
       glow.position.set(wx, 0.5, wz);
       levelGroup.add(glow);
-      knives.push({ mesh: g, glow, alive:true, baseY:0.25, seed: Math.random()*Math.PI*2 });
+      S.knives.push({ mesh: g, glow, alive:true, baseY:0.25, seed: Math.random()*Math.PI*2 });
     }
   }
 
-  // First-aid medkits — restore HP on pickup. 2–4 per floor.
+  // First-aid S.medkits — restore HP on pickup. 2–4 per floor.
   const medkitCount = 2 + Math.floor(Math.random() * 3);
   for (let i = 0; i < medkitCount && candidate.length; i++) {
     const k = Math.floor(Math.random() * candidate.length);
@@ -345,7 +337,7 @@ function buildLevel(n, opts = {}) {
     const glow = new THREE.PointLight(0xffd0d0, 0.4, 2.0, 2);
     glow.position.set(wx, 0.55, wz);
     levelGroup.add(glow);
-    medkits.push({ mesh: g, glow, alive: true, baseY: 0.20, seed: Math.random()*Math.PI*2 });
+    S.medkits.push({ mesh: g, glow, alive: true, baseY: 0.20, seed: Math.random()*Math.PI*2 });
   }
 
   // Stair exit at far corner
@@ -395,7 +387,7 @@ function buildLevel(n, opts = {}) {
     stair.position.set(wx, 0, wz);
     levelGroup.add(stair);
     stairExit = { mesh: stair, pos: new THREE.Vector3(wx, 0, wz), pillar, isFinal };
-    setStairExit(stairExit);
+    S.stairExit = stairExit;
   }
 
   // Bonus stair — warps to a random *other* floor. Placed far from spawn and
@@ -457,7 +449,7 @@ function buildLevel(n, opts = {}) {
     stair.position.set(wx, 0, wz);
     levelGroup.add(stair);
     randomStair = { mesh: stair, pos: new THREE.Vector3(wx, 0, wz), pillar };
-    setRandomStair(randomStair);
+    S.randomStair = randomStair;
   }
 
   // ---------- Elevator (corner placement, animated entry) ----------
@@ -614,7 +606,7 @@ function buildLevel(n, opts = {}) {
     const ec = entitySpawnPool[Math.floor(Math.random()*entitySpawnPool.length)];
     eg.position.set((ec[0]-GRID/2)*CELL, 0, (ec[1]-GRID/2)*CELL);
     levelGroup.add(eg);
-    entities.push({
+    S.entities.push({
       mesh: eg, speed: 1.4 + n*0.18, hp: 1.0,
       walkPhase: Math.random() * Math.PI * 2,
     });
@@ -659,7 +651,7 @@ function buildLevel(n, opts = {}) {
 }
 
 function spawnProps(cfg, openCells) {
-  const levelGroup = getLevelGroup();
+  const levelGroup = S.levelGroup;
   const candidate = openCells.slice();
   function pick(num) {
     const out = [];
@@ -674,7 +666,8 @@ function spawnProps(cfg, openCells) {
   if (cfg.spawnProps) {
     cfg.spawnProps({
       THREE, levelGroup, GRID, CELL, WALL_HEIGHT, pick,
-      wallBoxes, electricZones, toxicZones, moths, pool,
+      wallBoxes: S.wallBoxes, electricZones: S.electricZones,
+      toxicZones: S.toxicZones, moths: S.moths, pool,
       getButterflyProto, makeNoiseTexture,
     });
   }

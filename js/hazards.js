@@ -15,29 +15,28 @@
 // ctx shape:
 //   GRID, CELL                          — arena bounds for moth clamping
 //   controls, player, deathScreen, flashEl  — game refs
-//   getCompanions()                     — companion roster (read every
+//   companions                     — companion roster (read every
 //                                         frame so disposeLevel's
 //                                         reassignment is invisible to us)
-//   getElectricZones(), getToxicZones(), getMoths()
+//   S.electricZones, S.toxicZones, S.moths
 //                                       — current level's hazard arrays
 //   leaveCorpse, playDeathCry           — companion-death helpers
 //   playStatic, blip, say, speak        — audio + subtitles
 
 export function createHazards(ctx) {
   const {
+    S,
     GRID, CELL,
     controls, player, deathScreen, flashEl,
-    getCompanions,
-    getElectricZones, getToxicZones, getMoths,
     leaveCorpse, playDeathCry, playStatic,
     say, speak,
   } = ctx;
 
   function updateElectric(dt) {
-    const electricZones = getElectricZones();
+    const electricZones = S.electricZones;
     if (!electricZones.length) return;
     const pp = controls.getObject().position;
-    const companions = getCompanions();
+    const companions = companions;
     for (const z of electricZones) {
       z.phase += dt * 14;
       const flicker = 0.6 + Math.abs(Math.sin(z.phase)) * 0.9 + Math.random() * 0.3;
@@ -71,10 +70,10 @@ export function createHazards(ctx) {
   }
 
   function updateMoths(dt) {
-    const moths = getMoths();
+    const moths = S.moths;
     if (!moths.length) return;
     const pp = controls.getObject().position;
-    const companions = getCompanions();
+    const companions = companions;
     const ALARM_R = 4.5;     // moths only attack when player is within this radius
     for (const m of moths) {
       if (!m.alive) {
@@ -179,10 +178,10 @@ export function createHazards(ctx) {
   }
 
   function updateToxic(dt, t) {
-    const toxicZones = getToxicZones();
+    const toxicZones = S.toxicZones;
     if (!toxicZones.length) return;
     const pp = controls.getObject().position;
-    const companions = getCompanions();
+    const companions = companions;
     for (const z of toxicZones) {
       for (const b of z.bubbles) {
         b.mesh.position.y = b.baseY + Math.sin(t * 2.4 + b.seed) * 0.06;

@@ -49,6 +49,7 @@ MODULES = [
     'textures.js', 'audio.js', 'tts.js', 'lines.js',
     'weapons.js',
     'weapons_setup.js',
+    'state.js',
     'companion_roster.js',
     'player_state.js',
     'weapon_fx.js',
