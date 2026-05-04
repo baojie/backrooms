@@ -41,7 +41,12 @@ MODULES = [
     # Aggregator + the rest.
     'levels.js',
     'textures.js', 'audio.js', 'tts.js', 'lines.js',
-    'weapons.js', 'characters.js',
+    'weapons.js',
+    # Character builders — leaf files first, then the index.js facade.
+    'characters/loaders.js', 'characters/nametag.js', 'characters/knife.js',
+    'characters/hostile.js',
+    'characters/companion_procedural.js', 'characters/companion_gltf.js',
+    'characters/index.js',
 ]
 
 html = SRC.read_text(encoding='utf-8')
@@ -56,13 +61,26 @@ EXPORT_DECL_RE = re.compile(
     re.MULTILINE,
 )
 
-# Match `import <spec> from "./path"` (any relative path). Used to rewrite
-# inter-module imports inside helper modules to destructure from the bundled
-# IIFE vars. Limited to single-line imports.
+# `import <spec> from "./path"` (relative). Used to rewrite inter-module
+# imports inside helper modules to destructure from the bundled IIFE vars.
 LOCAL_IMPORT_RE = re.compile(
     r"^[ \t]*import\s*(\{[^}]*\}|\*\s*as\s*[A-Za-z_$][\w$]*|[A-Za-z_$][\w$]*)"
     r"\s*from\s*['\"](\.[\w./-]+)['\"]\s*;?\s*$",
+    re.MULTILINE | re.DOTALL,
+)
+
+# `export { a, b, c };` (no `from`) — pure re-export of already-imported
+# locals. We move the names into the IIFE's return block.
+EXPORT_LIST_RE = re.compile(
+    r"^[ \t]*export\s*\{([^}]+)\}\s*;?\s*$",
     re.MULTILINE,
+)
+
+# `export { a, b } from "./path"` — re-export from another module. Treated
+# as `const { a, b } = __mod_path; ... return { a, b }` inside the IIFE.
+EXPORT_FROM_RE = re.compile(
+    r"^[ \t]*export\s*\{([^}]+)\}\s*from\s*['\"](\.[\w./-]+)['\"]\s*;?\s*$",
+    re.MULTILINE | re.DOTALL,
 )
 
 def resolve_relative(importer_key: str, rel: str) -> str:
@@ -103,8 +121,44 @@ def wrap_module(name: str, src: str, mod_vars_so_far: dict) -> tuple[str, str]:
                      f'(resolved to {target}; not yet bundled)')
         return destructure(spec, var)
     src = LOCAL_IMPORT_RE.sub(local_repl, src)
-    # 3. Collect exported names; then strip the `export ` keyword prefix.
-    exports = []
+    # 3. Re-export-from: `export { a, b } from "./x.js"` — turn into a local
+    #    `const { a, b } = __mod_x;` *and* schedule a, b for the IIFE return.
+    re_export_names = []
+    def export_from_repl(mm):
+        spec_inner, rel = mm.group(1), mm.group(2)
+        target = resolve_relative(name, rel)
+        var = mod_vars_so_far.get(target)
+        if not var:
+            sys.exit(f'[deploy] {name}: unresolved re-export "{rel}" '
+                     f'(resolved to {target})')
+        names = []
+        parts = []
+        for raw in spec_inner.split(','):
+            p = raw.strip()
+            if not p: continue
+            m2 = re.match(r"([A-Za-z_$][\w$]*)\s+as\s+([A-Za-z_$][\w$]*)", p)
+            if m2:
+                parts.append(f'{m2.group(1)}: {m2.group(2)}')
+                names.append(m2.group(2))
+            else:
+                parts.append(p)
+                names.append(p)
+        re_export_names.extend(names)
+        return 'const { ' + ', '.join(parts) + ' } = ' + var + ';'
+    src = EXPORT_FROM_RE.sub(export_from_repl, src)
+    # 4. `export { a, b, c };` (no `from`) — local re-export list. Names go
+    #    into the IIFE return block; the statement is removed.
+    list_export_names = []
+    def export_list_repl(mm):
+        for raw in mm.group(1).split(','):
+            p = raw.strip()
+            if not p: continue
+            m2 = re.match(r"([A-Za-z_$][\w$]*)\s+as\s+([A-Za-z_$][\w$]*)", p)
+            list_export_names.append((m2.group(2) if m2 else p))
+        return ''
+    src = EXPORT_LIST_RE.sub(export_list_repl, src)
+    # 5. Collect inline-declared exports (`export const X`, `export function Y`).
+    exports = list(re_export_names) + list(list_export_names)
     for em in EXPORT_DECL_RE.finditer(src):
         exports.append(em.group(1) or em.group(2))
     if not exports:
