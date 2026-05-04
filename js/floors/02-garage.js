@@ -1,6 +1,6 @@
 // Floor 2 — 车库 (garage): one open hall with parked cars and concrete pillars.
 
-import { buildParking } from './_layouts.js';
+import { buildOpen } from './_layouts.js';
 
 export function spawnProps(ctx) {
   const { THREE, levelGroup, GRID, CELL, WALL_HEIGHT, wallBoxes } = ctx;
@@ -178,7 +178,7 @@ export function spawnProps(ctx) {
     // Player spawn is roughly at (0, 0). Don't park on top of them.
     for (let bx = -limit + 1.25; bx <= limit - 1.25; bx += 2.5) {
       if (Math.abs(bx) < 4 && Math.abs(z) < 8) continue;  // keep aisle near spawn clear
-      if (Math.random() < 0.32) continue;                // empty bays — keeps perf + realism
+      if (Math.random() < 0.18) continue;                // a few empty bays
       const color = carBodyPalette[Math.floor(Math.random()*carBodyPalette.length)];
       const type  = Math.random() < 0.30 ? 'hatch' : 'sedan';
       const car = buildCarMesh(color, type);
@@ -223,7 +223,7 @@ export function spawnProps(ctx) {
 
 export const FLOOR = {
   name: '车库',
-  buildLayout: buildParking,
+  buildLayout: buildOpen,         // single open hall — pillars come from spawnProps
   spawnProps,
   wallRGB:  [120, 120, 124],
   floorRGB: [ 70,  70,  72],

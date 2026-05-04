@@ -43,18 +43,6 @@ export function buildOpen(GRID) {
   return emptyGrid(GRID);
 }
 
-// Parking-lot pillars: regular grid of single-cell columns with wide aisles.
-export function buildParking(GRID) {
-  const cells = emptyGrid(GRID);
-  for (let x = 3; x < GRID-2; x += 4) {
-    for (let z = 2; z < GRID-1; z++) {
-      if (z % 6 === 0) continue;          // cross-aisles
-      cells[x][z].wall = true;
-    }
-  }
-  return cells;
-}
-
 // Industrial rooms: a few large rectangular rooms with single-cell doors.
 export function buildIndustrial(GRID) {
   const cells = emptyGrid(GRID);

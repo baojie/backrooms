@@ -63,7 +63,7 @@ export function createPickups(ctx) {
       m.mesh.position.y = m.baseY + Math.sin(t * 2.2 + m.seed) * 0.06;
       const dx = m.mesh.position.x - pp.x;
       const dz = m.mesh.position.z - pp.z;
-      if (dx*dx + dz*dz < 0.7*0.7 && player.hp < MAX_HP) {
+      if (dx*dx + dz*dz < 0.7*0.7) {
         const heal = Math.min(3000, MAX_HP - player.hp);
         m.alive = false;
         if (levelGroup) { levelGroup.remove(m.mesh); levelGroup.remove(m.glow); }
