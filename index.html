@@ -215,6 +215,7 @@ import { createElevator } from './js/elevator.js';
 import { leaveCorpse, createInteract } from './js/interact.js';
 import { setupInput } from './js/input.js';
 import { createHazards } from './js/hazards.js';
+import { createEntities } from './js/entities.js';
 
 // Bridge: audio's death cry needs the TTS speak callback
 function playDeathCry(c) { _playDeathCry(c, speak); }
@@ -1079,7 +1080,8 @@ let companionLineCooldown = 5;
 // `wallMeshRef` are dereffed via getters because they're rebuilt on each
 // level transition.
 const _wfx = createWeaponFX({
-  WEAPONS, player, camera, controls, flashEl,
+  WEAPONS, GRID, CELL, WALL_HEIGHT,
+  player, camera, controls, flashEl,
   entities, companions, wallBoxes, rockets, moths,
   getLevelGroup: () => levelGroup,
   getWallMeshRef: () => wallMeshRef,
@@ -1087,7 +1089,7 @@ const _wfx = createWeaponFX({
   playDeathCry, leaveCorpse,
 });
 const { useWeapon, fireGun, fireRocket, sprayInsecticide,
-        trySwingKnife, explode, destroyWallsAt } = _wfx;
+        trySwingKnife, explode, destroyWallsAt, tickRockets } = _wfx;
 
 // Companion AI + GLTF upgrade scheduler. Same closure pattern: arrays
 // captured by reference, levelGroup re-derived on each call.
@@ -1121,6 +1123,16 @@ const { updateElectric, updateMoths, updateToxic } = createHazards({
   getElectricZones: () => electricZones,
   getToxicZones:    () => toxicZones,
   getMoths:         () => moths,
+  leaveCorpse, playDeathCry, playStatic,
+  say, speak,
+});
+
+// Hostile entity AI (per-frame chase + animation) — see js/entities.js.
+const tickEntities = createEntities({
+  controls, player, deathScreen, flashEl,
+  getEntities:  () => entities,
+  getCompanions: () => companions,
+  getWallBoxes:  () => wallBoxes,
   leaveCorpse, playDeathCry, playStatic,
   say, speak,
 });
@@ -1337,137 +1349,9 @@ function tick() {
 
   _updateGuide(dt, t, { guide, controls, stairExit, cells, GRID, CELL, collide });
 
-  // ---- Rocket projectiles ----
-  for (let i = rockets.length - 1; i >= 0; i--) {
-    const r = rockets[i];
-    r.age += dt;
-    r.pos.addScaledVector(r.dir, 32 * dt);
-    r.mesh.position.copy(r.pos);
-
-    let hit = false;
-    // Wall collision
-    for (const wb of wallBoxes) {
-      const dx = r.pos.x - wb.x, dz = r.pos.z - wb.z;
-      if (Math.abs(dx) < wb.half + 0.15 && Math.abs(dz) < wb.half + 0.15) { hit = true; break; }
-    }
-    // Entity collision
-    if (!hit) {
-      for (const e of entities) {
-        if (e.mesh && e.mesh.position.distanceTo(r.pos) < 1.0) { hit = true; break; }
-      }
-    }
-    // Floor or ceiling
-    if (r.pos.y < 0.05 || r.pos.y > WALL_HEIGHT) hit = true;
-    // Time-out / out-of-bounds
-    if (r.age > 4.0) hit = true;
-    const limit = (GRID/2) * CELL;
-    if (Math.abs(r.pos.x) > limit || Math.abs(r.pos.z) > limit) hit = true;
-
-    if (hit) {
-      explode(r.pos.clone());
-      if (levelGroup) levelGroup.remove(r.mesh);
-      r.mesh.traverse(o => {
-        if (o.geometry) o.geometry.dispose();
-        if (o.material) o.material.dispose();
-      });
-      rockets.splice(i, 1);
-    }
-  }
-
-  for (const e of entities) {
-    const v = new THREE.Vector3().subVectors(pp, e.mesh.position);
-    const dist = v.length();
-    v.y = 0; v.normalize();
-    const next = e.mesh.position.clone().addScaledVector(v, e.speed * dt);
-    let blocked = false;
-    for (const w of wallBoxes) {
-      const hx = w.halfX ?? w.half, hz = w.halfZ ?? w.half;
-      const dx = next.x - w.x, dz = next.z - w.z;
-      if (Math.abs(dx) < hx + 0.4 && Math.abs(dz) < hz + 0.4) { blocked = true; break; }
-    }
-    let moved = false;
-    if (!blocked) { e.mesh.position.copy(next); moved = true; }
-    else {
-      for (const a of [Math.PI/2, -Math.PI/2, Math.PI]) {
-        const dd = v.clone().applyAxisAngle(new THREE.Vector3(0,1,0), a);
-        const n2 = e.mesh.position.clone().addScaledVector(dd, e.speed * dt);
-        let b2 = false;
-        for (const w of wallBoxes) {
-          const hx2 = w.halfX ?? w.half, hz2 = w.halfZ ?? w.half;
-          const dx = n2.x - w.x, dz = n2.z - w.z;
-          if (Math.abs(dx) < hx2 + 0.4 && Math.abs(dz) < hz2 + 0.4) { b2 = true; break; }
-        }
-        if (!b2) { e.mesh.position.copy(n2); moved = true; break; }
-      }
-    }
-    e.mesh.lookAt(pp.x, e.mesh.position.y, pp.z);
-
-    // Soldier GLTF: just tick the animation mixer
-    const eg = e.mesh.userData.gltf;
-    if (eg) {
-      eg.mixer.update(dt);
-      continue;
-    }
-
-    // Shambling rig animation — skip for far figures to save cost
-    const rig = e.mesh.userData.rig;
-    if (rig) {
-      const camDx = e.mesh.position.x - pp.x;
-      const camDz = e.mesh.position.z - pp.z;
-      if (camDx*camDx + camDz*camDz < 32 * 32) {
-        e.walkPhase = (e.walkPhase || 0) + dt * (moved ? 5.5 : 1.2);
-        const sw = moved ? Math.sin(e.walkPhase) * 0.45 : Math.sin(e.walkPhase) * 0.06;
-        rig.leftLeg.rotation.x  =  sw;
-        rig.rightLeg.rotation.x = -sw;
-        // Arms hover forward in a predatory reach, with a slight sway
-        rig.leftArm.rotation.x  = -0.55 + sw * 0.35;
-        rig.rightArm.rotation.x = -0.55 - sw * 0.35;
-        if (rig.skirt) rig.skirt.rotation.z = Math.sin(e.walkPhase * 0.6) * 0.06;
-        // Slow head tilt + breathing
-        rig.head.rotation.z = Math.sin(t * 1.1 + e.walkPhase) * 0.07;
-        if (rig.torso) {
-          const br = 1 + Math.sin(t * 1.6 + e.walkPhase) * 0.04;
-          rig.torso.scale.set(br, 1, br * 0.85);
-        }
-        // Eyes track the player
-        if (rig.lEyeball && rig.rEyeball) {
-          const local = e.mesh.worldToLocal(pp.clone());
-          const yaw = THREE.MathUtils.clamp(Math.atan2(local.x, -local.z) * 0.5, -0.4, 0.4);
-          rig.lEyeball.rotation.y = yaw;
-          rig.rEyeball.rotation.y = yaw;
-        }
-        // Jaw gnashing when close
-        if (rig.mouth) {
-          const open = dist < 6 ? 1 + Math.abs(Math.sin(t * 9)) * 1.6 : 1;
-          rig.mouth.scale.y = open;
-        }
-      }
-    }
-
-    if (dist < 1.0 && deathScreen.style.display !== 'flex') {
-      player.hp -= dt * 1000;     // live wire: 1000 HP/s (~10s death)
-      flashEl.style.opacity = '0.4';
-      setTimeout(() => flashEl.style.opacity = '0', 120);
-    }
-    for (const c of companions) {
-      if (!c.alive || !c.mesh) continue;
-      const cd = c.mesh.position.distanceTo(e.mesh.position);
-      if (cd < 1.0) {
-        c.hp -= dt * 0.8;
-        if (c.hp <= 0) {
-          c.alive = false;
-          leaveCorpse(c.mesh);
-          c.mesh = null;
-          // Death cry — vocal "啊!" via TTS, plus a synthesized scream tone
-          playDeathCry(c);
-          const line = `${c.name} 被吞没了……`;
-          say(line, 4);
-          speak('旁白', line, { rate: 0.8, pitch: 0.55 });
-          playStatic();
-        }
-      }
-    }
-  }
+  // Rocket projectiles + entity AI — see js/weapon_fx.js / js/entities.js.
+  tickRockets(dt);
+  tickEntities(dt, t);
 
   // Hazards (electric / moths / toxic) — see js/hazards.js.
   updateElectric(dt);

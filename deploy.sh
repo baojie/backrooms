@@ -59,6 +59,7 @@ MODULES = [
     'interact.js',
     'input.js',
     'hazards.js',
+    'entities.js',
     # Character builders — leaf files first, then the index.js facade.
     'characters/loaders.js', 'characters/nametag.js', 'characters/knife.js',
     'characters/hostile.js',

@@ -1,13 +1,14 @@
-// Weapon firing / impact effects.
+// Weapon firing / impact effects + active rocket projectile updater.
 //
 // `createWeaponFX(ctx)` factory takes a context object with the live game
 // state and returns the firing functions bound to it:
 //   fireGun, fireRocket, sprayInsecticide, trySwingKnife, useWeapon,
-//   explode, destroyWallsAt
+//   explode, destroyWallsAt, tickRockets
 //
 // `ctx` shape:
 //   THREE          — Three.js namespace
 //   WEAPONS        — weapon definition table (keyed by player.weapon)
+//   GRID, CELL, WALL_HEIGHT  — level bounds for projectile despawn
 //   player, camera, controls, flashEl  — game references
 //   entities, companions, wallBoxes, rockets, moths  — mutable arrays
 //                    (mutated in place; never reassigned)
@@ -21,7 +22,8 @@ import * as THREE from 'three';
 
 export function createWeaponFX(ctx) {
   const {
-    WEAPONS, player, camera, controls, flashEl,
+    WEAPONS, GRID, CELL, WALL_HEIGHT,
+    player, camera, controls, flashEl,
     entities, companions, wallBoxes, rockets, moths,
     getLevelGroup, getWallMeshRef,
     blip, playStatic, say, initAudio,
@@ -287,8 +289,48 @@ export function createWeaponFX(ctx) {
     }
   }
 
+  // Per-frame rocket-projectile update — called from tick(). Advances
+  // each rocket along its dir vector, tests for wall / entity / floor /
+  // ceiling / out-of-bounds / 4s timeout collision, and detonates via
+  // `explode()` on the first hit.
+  function tickRockets(dt) {
+    if (!rockets.length) return;
+    const levelGroup = getLevelGroup();
+    for (let i = rockets.length - 1; i >= 0; i--) {
+      const r = rockets[i];
+      r.age += dt;
+      r.pos.addScaledVector(r.dir, 32 * dt);
+      r.mesh.position.copy(r.pos);
+
+      let hit = false;
+      for (const wb of wallBoxes) {
+        const dx = r.pos.x - wb.x, dz = r.pos.z - wb.z;
+        if (Math.abs(dx) < wb.half + 0.15 && Math.abs(dz) < wb.half + 0.15) { hit = true; break; }
+      }
+      if (!hit) {
+        for (const e of entities) {
+          if (e.mesh && e.mesh.position.distanceTo(r.pos) < 1.0) { hit = true; break; }
+        }
+      }
+      if (r.pos.y < 0.05 || r.pos.y > WALL_HEIGHT) hit = true;
+      if (r.age > 4.0) hit = true;
+      const limit = (GRID/2) * CELL;
+      if (Math.abs(r.pos.x) > limit || Math.abs(r.pos.z) > limit) hit = true;
+
+      if (hit) {
+        explode(r.pos.clone());
+        if (levelGroup) levelGroup.remove(r.mesh);
+        r.mesh.traverse(o => {
+          if (o.geometry) o.geometry.dispose();
+          if (o.material) o.material.dispose();
+        });
+        rockets.splice(i, 1);
+      }
+    }
+  }
+
   return {
     useWeapon, fireGun, fireRocket, sprayInsecticide,
-    trySwingKnife, explode, destroyWallsAt,
+    trySwingKnife, explode, destroyWallsAt, tickRockets,
   };
 }
