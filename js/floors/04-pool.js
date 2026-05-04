@@ -226,43 +226,45 @@ export function spawnProps(ctx) {
     toxicZones.push({ x: wx, z: wz, r: 1.6, slime, bubbles, glow });
   }
 
-  // Wooden rowboats — board with E to glide over hazards safely. Floats
-  // on the pool surface so the player can step from the deck into one.
+  // Wooden rowboats — float just above the pool surface, inside the pool
+  // footprint. Press E adjacent to one to board: the player glides over
+  // electric / toxic zones without taking damage.
   for (const [wx, wz] of inPoolPick(2)) {
     const boat = new THREE.Group();
     const woodMat = new THREE.MeshLambertMaterial({ color: 0x6b3a1a });
     const trimMat = new THREE.MeshLambertMaterial({ color: 0x4a2810 });
     const hull = new THREE.Mesh(new THREE.BoxGeometry(1.4, 0.35, 2.8), woodMat);
-    hull.position.y = surfY + 0.05;
+    hull.position.y = 0.05;
     boat.add(hull);
     const well = new THREE.Mesh(new THREE.BoxGeometry(1.05, 0.2, 2.4), trimMat);
-    well.position.y = surfY + 0.20;
+    well.position.y = 0.20;
     boat.add(well);
     const bow = new THREE.Mesh(new THREE.ConeGeometry(0.7, 0.7, 4), woodMat);
     bow.rotation.x = Math.PI / 2;
     bow.rotation.z = Math.PI / 4;
-    bow.position.set(0, surfY + 0.05, 1.55);
+    bow.position.set(0, 0.05, 1.55);
     boat.add(bow);
     const stern = bow.clone();
     stern.position.z = -1.55;
     stern.rotation.x = -Math.PI / 2;
     boat.add(stern);
     const bench = new THREE.Mesh(new THREE.BoxGeometry(1.0, 0.08, 0.35), trimMat);
-    bench.position.y = surfY + 0.32;
+    bench.position.y = 0.32;
     boat.add(bench);
     const oar = new THREE.Mesh(new THREE.CylinderGeometry(0.04, 0.04, 1.6, 6), woodMat);
     oar.rotation.z = Math.PI / 2;
-    oar.position.set(0.7, surfY + 0.30, 0.2);
+    oar.position.set(0.7, 0.30, 0.2);
     boat.add(oar);
-    boat.position.set(wx, 0, wz);
+    // Group sits AT the water surface; children offsets are above it so
+    // the hull half-submerges the way a real rowboat does.
+    boat.position.set(wx, surfY, wz);
     boat.rotation.y = Math.random() * Math.PI * 2;
     levelGroup.add(boat);
     boats.push({ mesh: boat, x: wx, z: wz, yaw: boat.rotation.y, occupied: false });
   }
 
-  // Moth swarm — fluttering insecticide-vulnerable hazards perched on the
-  // pool deck pillars. Quiet enough to set mood, loud enough to demand
-  // the spray-can weapon.
+  // Moth swarm — perched on the pool-room walls; bite for 80 HP and only
+  // the spray-can (key 5) kills them in one hit.
   const NUM_MOTHS = 4;
   for (let i = 0; i < NUM_MOTHS; i++) {
     const moth = new THREE.Group();
